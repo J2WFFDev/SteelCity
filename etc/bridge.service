@@ -1,0 +1,16 @@
+
+[Unit]
+Description=SteelCity Impact Bridge
+After=bluetooth.service network-online.target
+Wants=bluetooth.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/steelcity
+ExecStart=/usr/bin/python3 -m scripts.run_bridge --config %h/projects/steelcity/config.yaml
+Restart=always
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

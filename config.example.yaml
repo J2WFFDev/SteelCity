@@ -1,0 +1,20 @@
+
+amg:
+  adapter: "hci0"
+  mac: null          # optional: set MAC or partial name
+  name: null
+  start_uuid: "REPLACE-ME"   # characteristic that notifies on START
+sensors:
+  - plate: "P1"
+    adapter: "hci0"
+    mac: "REPLACE-ME"        # BT50 MAC
+    notify_uuid: "REPLACE-ME"  # BT50 characteristic that streams vibration data
+    config_uuid: null          # optional: write to set detection cycle to 100 Hz
+detector:
+  triggerHigh: 8.0
+  triggerLow: 2.0
+  ring_min_ms: 30
+  dead_time_ms: 100
+logging:
+  dir: "./logs"
+  file_prefix: "bridge"
