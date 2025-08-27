@@ -19,3 +19,8 @@ venv/
 .vscode/
 .idea/
 EOF
+
+# Artifacts
+*.zip
+*.csv
+
