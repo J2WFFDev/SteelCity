@@ -2,8 +2,7 @@
 import asyncio, argparse, datetime as dt, csv, os
 from bleak import BleakScanner, BleakClient
 
-def now_ms():
-    return dt.datetime.utcnow().isoformat(timespec="milliseconds")+"Z"
+def now_ms(): return dt.datetime.utcnow().isoformat(timespec="milliseconds")+"Z"
 
 async def main():
     ap = argparse.ArgumentParser()
@@ -15,54 +14,50 @@ async def main():
     ap.add_argument("--csv", default="sniff_all.csv")
     args = ap.parse_args()
 
-    if os.path.exists(args.csv) and os.stat(args.csv).st_size == 0:
-        pass
     header_needed = not os.path.exists(args.csv) or os.stat(args.csv).st_size == 0
     f = open(args.csv, "a", newline="")
     w = csv.writer(f)
     if header_needed:
-        w.writerow(["utc_iso","uuid","len","hex"])
+        w.writerow(["utc_iso","uuid","len","hex"]); f.flush()
 
-    dev = None
     if args.mac:
         dev = await BleakScanner.find_device_by_address(args.mac, cb=dict(use_bdaddr=False))
     else:
+        dev = None
         for d in await BleakScanner.discover(adapter=args.adapter, timeout=8.0):
-            if args.name.lower() in (d.name or "").lower():
+            if (args.name or "").lower() in (d.name or "").lower():
                 dev = d; break
-    if not dev:
-        raise SystemExit("device not found")
+    if not dev: raise SystemExit("device not found")
 
     print(f"[ble] connect {dev.address} ({dev.name}) …")
     async with BleakClient(dev, timeout=20.0, device=args.adapter) as client:
-        # subscribe to all notify/indicate chars
         subs = []
         for svc in client.services:
             for ch in svc.characteristics:
                 props = set(ch.properties or [])
                 if "notify" in props or "indicate" in props:
                     u = str(ch.uuid).lower()
-                    async def make_cb(uuid):
-                        async def cb(_, data: bytearray):
-                            b = bytes(data)
-                            print(f"[{uuid}] len={len(b)} hex={b.hex()}")
-                            w.writerow([now_ms(), uuid, len(b), b.hex()]); f.flush()
-                        return cb
-                    cb = await make_cb(u)
-                    print(f"[sub] {u} ({','.join(props)})")
-                    await client.start_notify(ch.uuid, cb)
-                    subs.append(ch.uuid)
+                    print(f"[sub] {u} (notify)")
+                    def cb(_, data: bytearray, uuid=u):
+                        b = bytes(data)
+                        print(f"[{uuid}] len={len(b)} hex={b.hex()}")
+                        w.writerow([now_ms(), uuid, len(b), b.hex()]); f.flush()
+                    await client.start_notify(u, cb)
+                    subs.append(u)
 
         print("[sniffing] press Start/beep/arrow; Ctrl+C to stop early")
         try:
             await asyncio.sleep(args.secs)
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, asyncio.CancelledError):
             pass
-
-        for u in subs:
-            try: await client.stop_notify(u)
-            except Exception: pass
-    f.close()
+        finally:
+            for u in subs:
+                try: await client.stop_notify(u)
+                except: pass
+            f.close()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

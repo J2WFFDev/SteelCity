@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
-import csv, sys, collections
+import csv, sys
+from collections import defaultdict
 
-path = sys.argv[1] if len(sys.argv)>1 else "amg_log.csv"
-by_tail = collections.defaultdict(list)
+if len(sys.argv) != 2:
+    print("usage: summarize_amg_csv.py <shot_summary.csv>"); sys.exit(2)
+path = sys.argv[1]
 
-def h2i(x): return int(x,16)
+try:
+    with open(path, newline="") as f:
+        r = list(csv.DictReader(f))
+except FileNotFoundError:
+    print(f"[err] not found: {path}"); sys.exit(2)
 
-with open(path, newline="") as f:
-    r = csv.DictReader(f)
-    for row in r:
-        if row.get("type") != "frame": 
-            continue
-        # header bytes b2/b3 both equal the shot index in your captures
-        try:
-            n = h2i(row["b2"])
-        except Exception:
-            continue
-        tail = row["tail_hex"]
-        p1 = int(row["p1"]); p2 = int(row["p2"]); p3 = int(row["p3"]); p4 = int(row["p4"])
-        by_tail[tail].append((n, p1, p2, p3, p4, row["hex"]))
+if not r:
+    print("[info] empty file"); sys.exit(0)
 
-for tail, items in sorted(by_tail.items()):
-    items.sort(key=lambda x: x[0])
-    print(f"\n=== tail {tail} (string since power-on) ===")
-    for n,p1,p2,p3,p4,hexstr in items:
-        print(f"  shot {n:2d}:  T={p1/100:.2f}s  split={p2/100:.2f}s  first={p3/100:.2f}s  (dup={p4/100:.2f}s)  {hexstr}")
+by_tail = defaultdict(list)
+for row in r:
+    by_tail[row["tail_hex"]].append(row)
+
+for tail in sorted(by_tail.keys()):
+    print(f"=== tail {tail} (string since power-on) ===")
+    rows = sorted(by_tail[tail], key=lambda x: int(x["shot_idx"]))
+    for row in rows:
+        print(f"  shot {int(row['shot_idx']):2d}:  T={float(row['T_s']):.2f}s  split={float(row['split_s']):.2f}s  first={float(row['first_s']):.2f}s  {row['hex'][:12]}…")
+    print()
