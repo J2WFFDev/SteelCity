@@ -1,26 +1,42 @@
-cat > .gitignore << 'EOF'
 # Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*.class
 *.pytest_cache/
+.pytest_cache/
 .coverage
+.coverage.*
+.dist/
+dist/
+build/
+.eggs/
 *.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.pylint.d/
 
 # Virtual envs
 .venv/
-env/
 venv/
+env/
+ENV/
+.env
+.python-version
 
 # OS/editor
 .DS_Store
 *.swp
+*.swo
 .vscode/
 .idea/
-EOF
 
-# Artifacts
-*.zip
+# Logs & artifacts
+*.log
 *.csv
+*.zip
+*.bak
+*.old
 
+# Byte-compiled C extensions
+*.pyd
