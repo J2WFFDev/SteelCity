@@ -1,0 +1,17 @@
+[Unit]
+Description=SteelCity NDJSON -> SQLite Ingest (User)
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/steelcity
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=%h/projects/steelcity/src
+ExecStart=%h/projects/steelcity/.venv/bin/python -m tools.ingest_follow --logs logs --prefix bridge --db logs/bridge.db --poll-ms 200 --from-start
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

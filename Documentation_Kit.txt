@@ -1,0 +1,40 @@
+## 1) Executive One-Pager
+
+**Problem:** Match directors and range officers need reliable, fast, and accurate hit detection on steel plates. Manual spotting is slow, error-prone, and doesn’t integrate cleanly with scoring software. High-volume use demands rugged hardware that survives repeated impacts. Current match flow often requires painting steel plates between athletes or strings, causing cost, delays, and safety issues. Sensors can reduce paint reliance, though athletes may still need visual confirmation (future add-ons: LEDs or back-lighting).
+
+**Proposed Solution:** Wireless sensor nodes mounted behind plates detect impacts and relay events via BLE to a Raspberry Pi “bridge.” The bridge aggregates and hands off clean event records to dashboards and later to PractiScore. MVP focuses on text/log dashboards; Phase 2 adds PractiScore; long term: video sync.
+
+**Benefits:**
+- Accuracy: removes human error.
+- Speed: real-time data.
+- Safety: fewer people downrange.
+- Match Flow Efficiency: reduces painting cycles and RO workload.
+- Cost Savings: less paint, fewer resets between shooters.
+- Scalability: multiple plates per stage.
+- Coaching: granular data, future notes, long-term video.
+- Optional Accessories: LED indicators provide athlete/spectator visual feedback; BLE dongles enhance range.
+
+**Cost to MVP & Pilot:** ~$410–420 per stage (6 sensors, bridge, charging kit). Assembly and integration extra.
+
+**Risks & Mitigations:**
+- Sensor survivability.
+- BLE reliability.
+- App integration phased to later.
+- Visual confirmation gap (LED add-ons optional, evaluated in later phases).
+- AMG Commander firmware dependency (wireless LCD update).
+
+**Timeline (milestones):**
+- Now: decoding + BLE.
+- 1–2 mo: dashboards.
+- 3–6 mo: PractiScore integration with pilot.
+- 3–6 mo: optional accessory evaluation (LED indicators, BLE dongle).
+- 9 mo: production-ready.
+- 12 mo: manufacturing plan.
+
+**Ask:** Budget and sponsor support for pilot.
+
+---
+
+## 2) Product Brief
+
+... (truncated for brevity in this code snippet)

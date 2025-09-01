@@ -21,7 +21,8 @@ async def main():
         w.writerow(["utc_iso","uuid","len","hex"]); f.flush()
 
     if args.mac:
-        dev = await BleakScanner.find_device_by_address(args.mac, cb=dict(use_bdaddr=False))
+        # Prefer direct connection by MAC without scanning to avoid BlueZ 'InProgress'
+        dev = args.mac
     else:
         dev = None
         for d in await BleakScanner.discover(adapter=args.adapter, timeout=8.0):
@@ -29,9 +30,21 @@ async def main():
                 dev = d; break
     if not dev: raise SystemExit("device not found")
 
-    print(f"[ble] connect {dev.address} ({dev.name}) …")
-    async with BleakClient(dev, timeout=20.0, device=args.adapter) as client:
+    dev_mac = dev if isinstance(dev, str) else getattr(dev, 'address', None)
+    dev_name = None if isinstance(dev, str) else getattr(dev, 'name', None)
+    if dev_name:
+        print(f"[ble] connect {dev_mac} ({dev_name}) …")
+    else:
+        print(f"[ble] connect {dev_mac} …")
+    async with BleakClient(dev_mac, timeout=20.0, device=args.adapter) as client:
         subs = []
+        # Ensure services are populated across Bleak versions
+        try:
+            get_services = getattr(client, 'get_services', None)
+            if callable(get_services):
+                await get_services()
+        except Exception:
+            pass
         for svc in client.services:
             for ch in svc.characteristics:
                 props = set(ch.properties or [])

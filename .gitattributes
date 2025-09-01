@@ -1,0 +1,19 @@
+# Normalize text files to LF in repo; checkout CRLF on Windows as needed, but keep LF in repo
+* text=auto eol=lf
+
+# Explicitly mark common code/scripts as text with LF
+*.py text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.service text eol=lf
+
+# Do not normalize binary files
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.gif -text
+*.pdf -text
+*.zip -text
+*.gz -text

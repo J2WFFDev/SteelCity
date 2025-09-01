@@ -4,12 +4,31 @@ amg:
   mac: null          # optional: set MAC or partial name
   name: null
   start_uuid: "REPLACE-ME"   # characteristic that notifies on START
+  write_uuid: "6e400002-b5a3-f393-e0a9-e50e24dcca9e"  # optional: Nordic UART write characteristic (for commands)
+  init_cmds: []   # optional: e.g., [{text: "BEEP\n"}, {hex: "01-02-03", delay_ms: 100}]
+  commands:       # optional: named commands you can call (beep, set_sensitivity)
+    # beep:
+    #   hex: "A1-B2"              # static hex payload
+    #   text: "BEEP\n"            # or a text payload (mutually exclusive with hex)
+    # set_sensitivity:
+    #   hex_template: "AA-55-{level:02X}"   # use {level} to insert a byte
+    #   # text_template: "SENS {level}\n"
+  # Reconnect/backoff tuning
+  reconnect_initial_sec: 2.0
+  reconnect_max_sec: 20.0
+  reconnect_jitter_sec: 1.0
 sensors:
   - plate: "P1"
     adapter: "hci0"
     mac: "REPLACE-ME"        # BT50 MAC
     notify_uuid: "REPLACE-ME"  # BT50 characteristic that streams vibration data
     config_uuid: null          # optional: write to set detection cycle to 100 Hz
+  # Idle/keepalive + reconnect tuning
+  idle_reconnect_sec: 15.0
+  keepalive_batt_sec: 60.0
+  reconnect_initial_sec: 2.0
+  reconnect_max_sec: 20.0
+  reconnect_jitter_sec: 1.0
 detector:
   triggerHigh: 8.0
   triggerLow: 2.0

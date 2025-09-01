@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "http://example.com/steelcity/schema_v1.json",
+  "title": "SteelCity NDJSON v1",
+  "type": "object",
+  "required": ["seq", "type", "ts_ms"],
+  "properties": {
+    "seq": { "type": "integer", "minimum": 0 },
+    "type": { "type": "string", "enum": ["event","status","info","error","debug"] },
+    "ts_ms": { "type": "number" },
+    "t_rel_ms": { "type": ["number","null"] },
+    "plate": { "type": "string" },
+    "msg": { "type": "string" },
+    "data": { "type": "object" },
+    "session_id": { "type": "string" },
+    "pid": { "type": "integer" }
+  },
+  "additionalProperties": true
+}

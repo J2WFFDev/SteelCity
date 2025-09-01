@@ -1,0 +1,24 @@
+[Unit]
+Description=SteelCity Impact Bridge (User)
+After=bluetooth.service network-online.target
+Wants=bluetooth.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/projects/steelcity
+Environment=PYTHONUNBUFFERED=1
+Environment=BRIDGE_AS_SERVICE=1
+Environment=PYTHONPATH=%h/projects/steelcity/src
+Environment=BRIDGE_CONFIG=%h/projects/steelcity/config.yaml
+StandardOutput=journal
+StandardError=journal
+# Optional environment configuration
+EnvironmentFile=-%h/projects/steelcity/etc/bridge.env
+# Run the bridge directly with the venv python to ensure deps are available.
+# BRIDGE_CONFIG can override config path (set via Environment= or EnvironmentFile)
+ExecStart=%h/projects/steelcity/.venv/bin/python -m scripts.run_bridge --config $BRIDGE_CONFIG
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

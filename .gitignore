@@ -28,14 +28,21 @@ ENV/
 .DS_Store
 *.swp
 *.swo
-.vscode/
+# Keep shared tasks.json but ignore other editor files
+.vscode/*
+!.vscode/tasks.json
 .idea/
 
 # Logs & artifacts
+logs/
+*.ndjson
 *.log
 *.csv
 *.zip
+*.tgz
+*.tar.gz
 *.bak
+*.bak.*
 *.old
 
 # Byte-compiled C extensions

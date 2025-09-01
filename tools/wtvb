@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""
+Unified CLI wrapper for WTVB tools.
+
+Usage:
+  wtvb decode IN.csv OUT.csv [--baseline-ms 800]
+  wtvb watch-spikes [decoded.csv] [--thr 120]
+  wtvb watch-events [decoded.csv] [--thr 120] [--gap-s 0.20] [--hz 25] [--from-start] [--exit-on-eof]
+  wtvb events-csv decoded.csv out.csv [thr gap_s]
+
+This thin wrapper just dispatches to existing scripts so users have a single entrypoint.
+"""
+from __future__ import annotations
+import argparse, os, sys, subprocess
+
+
+def run(cmd):
+    return subprocess.call(cmd)
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="wtvb", description="Unified CLI for WTVB tools")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p_dec = sub.add_parser("decode", help="Decode raw or word CSV to normalized decoded CSV")
+    p_dec.add_argument("in_csv")
+    p_dec.add_argument("out_csv")
+    p_dec.add_argument("--baseline-ms", type=int, default=None)
+
+    p_ws = sub.add_parser("watch-spikes", help="Print spikes above threshold from decoded CSV")
+    p_ws.add_argument("decoded_csv", nargs="?", default="wtvb_decoded.csv")
+    p_ws.add_argument("--thr", default="120")
+
+    p_we = sub.add_parser("watch-events", help="Group spikes into events from decoded CSV")
+    p_we.add_argument("decoded_csv", nargs="?", default="wtvb_decoded.csv")
+    p_we.add_argument("--thr", default="120")
+    p_we.add_argument("--gap-s", default="0.20")
+    p_we.add_argument("--hz", default="25")
+    p_we.add_argument("--from-start", action="store_true")
+    p_we.add_argument("--exit-on-eof", action="store_true")
+
+    p_ev = sub.add_parser("events-csv", help="Export events CSV from decoded CSV")
+    p_ev.add_argument("decoded_csv")
+    p_ev.add_argument("out_csv")
+    p_ev.add_argument("thr", nargs="?", default="120")
+    p_ev.add_argument("gap_s", nargs="?", default="0.20")
+
+    args = ap.parse_args(argv)
+    if args.cmd == "decode":
+        return run([sys.executable, "tools/wtvb_decode_5561.py", args.in_csv, args.out_csv] +
+                   (["--baseline-ms", str(args.baseline_ms)] if args.baseline_ms is not None else []))
+    if args.cmd == "watch-spikes":
+        return run(["bash", "tools/watch_spikes.sh", args.decoded_csv, str(args.thr)])
+    if args.cmd == "watch-events":
+        cmd = [sys.executable, "tools/watch_events.py", args.decoded_csv,
+               "--thr", str(args.thr), "--gap-s", str(args.gap_s), "--hz", str(args.hz)]
+        if args.from_start: cmd.append("--from-start")
+        if args.exit_on_eof: cmd.append("--exit-on-eof")
+        return run(cmd)
+    if args.cmd == "events-csv":
+        return run([sys.executable, "tools/events_from_csv.py", args.decoded_csv, args.out_csv, str(args.thr), str(args.gap_s)])
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

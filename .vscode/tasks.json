@@ -1,0 +1,86 @@
+{
+	// VS Code tasks for quick Git workflows and Pi operations
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Git: Push local (origin/main)",
+			"type": "shell",
+			"options": { "cwd": "${workspaceFolder}" },
+			"command": "git add -A && git commit -m \"chore: save work\" || echo no changes && git push",
+			"problemMatcher": []
+		},
+		{
+			"label": "Pi: SSH pull + install",
+			"type": "shell",
+			"command": "ssh raspberrypi 'set -e; cd ~/projects/steelcity; git pull --rebase; source .venv/bin/activate; python -m pip install -e \".[dev]\"'",
+			"problemMatcher": []
+		},
+		{
+			"label": "Pi: Run bridge (bg)",
+			"type": "shell",
+			"command": "ssh raspberrypi 'cd ~/projects/steelcity && source .venv/bin/activate && PYTHONPATH=src nohup python -m scripts.run_bridge --config config.yaml > logs/bridge_run.out 2>&1 & echo PID:$!'",
+			"problemMatcher": []
+		},
+		{
+			"label": "Pi: Stop bridge",
+			"type": "shell",
+			"command": "ssh raspberrypi 'pkill -f scripts.run_bridge || true'",
+			"problemMatcher": []
+		},
+		{
+			"label": "Pi: Tail latest NDJSON",
+			"type": "shell",
+			"command": "ssh raspberrypi 'cd ~/projects/steelcity; latest=$(ls -t logs/bridge_*.ndjson 2>/dev/null | head -n 1 || true); echo LATEST:$latest; [ -n \"$latest\" ] && tail -n 100 \"$latest\" || echo no logs'",
+			"problemMatcher": []
+		},
+		{
+			"label": "Pi: Pull latest (origin/main)",
+			"type": "shell",
+			"command": "ssh raspberrypi 'cd ~/projects/steelcity && git pull --rebase --autostash'",
+			"group": "build",
+			"problemMatcher": [],
+			"detail": "Pull latest changes on the Raspberry Pi in ~/projects/steelcity"
+		},
+		{
+			"label": "Pi: Install deps",
+			"type": "shell",
+			"command": "ssh raspberrypi 'cd ~/projects/steelcity && python3 -m pip install -U pip && python3 -m pip install -e \".[dev]\" --user'",
+			"problemMatcher": [],
+			"detail": "Install/update project dependencies on the Pi using pip (editable install)"
+		},
+		{
+			"label": "Pi: Run discover BT50",
+			"type": "shell",
+			"command": "ssh -tt raspberrypi 'cd ~/projects/steelcity && python3 -u -m scripts.discover_bt50 --adapter hci0 --name WIT'",
+			"problemMatcher": [],
+			"detail": "Discover the WitMotion BT50 (scan for name WIT on adapter hci0)"
+		},
+		{
+			"label": "Pi: Run bridge (config.yaml)",
+			"type": "shell",
+			"command": "ssh -tt raspberrypi 'cd ~/projects/steelcity && python3 -u -m scripts.run_bridge --config config.yaml'",
+			"problemMatcher": [],
+			"detail": "Run the BLE bridge on the Pi using config.yaml; logs to ./logs on the Pi"
+		},
+		{
+			"label": "Pi: Tail logs (journalctl bridge)",
+			"type": "shell",
+			"command": "ssh -tt raspberrypi 'journalctl -u bridge -f'",
+			"problemMatcher": [],
+			"detail": "Follow the systemd bridge service logs on the Pi"
+		},
+		{
+			"label": "Pi: Restart bridge service (sudo)",
+			"type": "shell",
+			"command": "ssh -tt raspberrypi 'sudo systemctl restart bridge'",
+			"problemMatcher": [],
+			"detail": "Restart the systemd bridge service on the Pi (will prompt for sudo password)"
+		},
+		{
+			"label": "Open Tasks UI",
+			"type": "shell",
+			"command": "echo Use Ctrl+Shift+P -> Tasks: Run Task, or Terminal -> Run Task to use Pi helper tasks.",
+			"group": "build"
+		}
+	]
+}
