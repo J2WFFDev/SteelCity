@@ -247,6 +247,24 @@ class Bridge:
     def _on_amg_raw(self, ts_ns: int, raw: bytes):
         if getattr(self.amg, "debug_raw", False):
             self.logger.write({"type":"debug","msg":"Shot_raw","data":{"raw": raw.hex()}})
+        
+        # Generate individual AMG_RAW shot event (similar to BT50_RAW)
+        device_id = self.amg.mac[-4:] if hasattr(self.amg, 'mac') else "DC1A"
+        shot_time_ms = round(ts_ns / 1_000_000, 3)
+        
+        # Create AMG_RAW event with chronological timestamp
+        event_data = {
+            "type": "event",
+            "msg": "AMG_RAW",
+            "data": {
+                "device_id": device_id,
+                "timestamp_ms": shot_time_ms,
+                "signal": "Impact",
+                "raw": raw.hex()
+            }
+        }
+        self.logger.write(event_data)
+        
         # Track last AMG activity to help infer start button prior to T0
         self._last_amg_ns = ts_ns
 
