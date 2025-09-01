@@ -44,6 +44,12 @@ class DetectorCfg:
     triggerLow: float = 2.0
     ring_min_ms: int = 30
     dead_time_ms: int = 100
+    # warm-up time before arming detector (lets baseline settle)
+    warmup_ms: int = 300
+    # minimum baseline power required to consider ratio meaningful
+    baseline_min: float = 1e-4
+    # absolute minimum amplitude to consider (guards low-noise spikes)
+    min_amp: float = 1.0
 
 @dataclass
 class LoggingCfg:

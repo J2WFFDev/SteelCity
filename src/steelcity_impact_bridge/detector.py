@@ -33,12 +33,17 @@ class HitDetector:
     def update(self, amp: float, dt_ms: float):
         self.elapsed_ms += dt_ms
         self.since_last_hit_ms += dt_ms
-        # update baseline
-        self.idle_rms = 0.99 * self.idle_rms + 0.01 * (amp * amp)
+        
+        env = abs(amp)
+        
+        # Only update baseline with low-amplitude samples to avoid impact contamination
+        if env <= self.p.min_amp * 2.0:  # Only use calm periods for baseline
+            self.idle_rms = 0.99 * self.idle_rms + 0.01 * (amp * amp)
+        
         # arm detector after warmup and meaningful baseline established
         if (not self.armed) and self.elapsed_ms >= self.p.warmup_ms and self.idle_rms >= self.p.baseline_min:
             self.armed = True
-        env = abs(amp)
+            
         pow_ratio = (env * env) / (self.idle_rms + 1e-9)
 
         if self.state == "idle":
