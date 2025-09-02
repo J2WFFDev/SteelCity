@@ -1,18 +1,13 @@
+# Temporary config file for BT50-only testing
 
-amg:
-  adapter: "hci0"
-  mac: "60:09:C3:1F:DC:1A"
-  name: null
-  start_uuid: "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
-  write_uuid: "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
-  # Optional initial commands to send right after connect
-  init_cmds: []
-  # Named command mappings for tools/amg_control.py and AmgClient helpers
-  commands:
-    beep:
-      text: "BEEP"
-    test_raw_aa10:
-      hex: "AA-10"
+# AMG section commented out to disable timer
+#amg:
+#  adapter: "hci0"
+#  mac: "60:09:C3:1F:DC:1A"
+#  name: null
+#  start_uuid: "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+#  write_uuid: "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+
 sensors:
   - plate: "P1"
     adapter: "hci0"
@@ -23,6 +18,7 @@ sensors:
     keepalive_batt_sec: 30.0     # More frequent keepalive - 30 seconds
     reconnect_initial_sec: 0.1   # IMMEDIATE reconnect - within BT50 advertising window
     reconnect_max_sec: 2.0       # Max 2 seconds - must connect during advertising
+
 detector:
   triggerHigh: 0.05   # Very low threshold - any movement triggers
   triggerLow: 0.01    # Minimal threshold for release
@@ -31,6 +27,7 @@ detector:
   warmup_ms: 2000     # Extended warmup for power state transitions
   baseline_min: 1e-6  # Very low baseline minimum
   min_amp: 0.01       # Critical: allow very small amplitudes
+
 logging:
   dir: "./logs"
   file_prefix: "bridge"

@@ -22,13 +22,9 @@ class Bridge:
         self._stream_stats = {}
         self._stop = False
         self._bt_tasks: List[asyncio.Task] = []
-        
-        # BT50 sample buffering for impact counting
-        self._bt50_samples = {}  # sensor_id -> list of (ts_ns, amp, vx, vy, vz)
-        self._bt50_last_processed = {}  # sensor_id -> last processed timestamp
 
     async def start(self):
-        # Start AMG listener with reconnect/backoff loop (only if AMG is configured)
+        # Start AMG listener with reconnect/backoff loop
         async def _amg_loop():
             backoff = max(0.0, float(self.cfg.amg.reconnect_initial_sec))
             max_b = max(backoff, float(self.cfg.amg.reconnect_max_sec))
@@ -130,15 +126,7 @@ class Bridge:
                 await asyncio.sleep(min(max_b, backoff) + (jitter if jitter > 0 else 0))
                 backoff = min(max_b, max(1.0, backoff * 1.7))
 
-        # Only start AMG loop if AMG is configured (has MAC or name)
-        if self.cfg.amg.mac or self.cfg.amg.name:
-            asyncio.create_task(_amg_loop())
-        else:
-            self.logger.write({
-                "type": "info",
-                "msg": "AMG_skipped",
-                "data": {"reason": "no_mac_or_name_configured"}
-            })
+        asyncio.create_task(_amg_loop())
 
         # Start BT50 sensor loops (with reconnect)
         for s in self.cfg.sensors:
@@ -194,16 +182,6 @@ class Bridge:
                 self.detectors[sensor_id] = HitDetector(DetectorParams(**self.cfg.detector.__dict__))
             # Log connection details
             self.logger.write({"type": "info", "msg": "Sensor_connected", "data": {"sensor_id": sensor_id, "adapter": adapter, "mac": mac, "notify_uuid": notify_uuid}})
-            
-            # Initialize t0_ns for BT50-only mode (since AMG is disabled)
-            if self.t0_ns is None:
-                self.t0_ns = time.time_ns()
-                self.logger.write({
-                    "type": "event",
-                    "msg": "Timer_START_BTN", 
-                    "data": {"method": "bt50_connection_init"}
-                })
-            
             # reset backoff on success
             backoff = reconnect_initial
             # Snapshot battery and services (best-effort)
@@ -245,31 +223,8 @@ class Bridge:
         self.logger.write({"type":"event","t_rel_ms":0.0,"msg":"T0","data":{"raw": raw.hex()}})
 
     def _on_amg_raw(self, ts_ns: int, raw: bytes):
-        # DEBUG: Log that this method is being called
-        self.logger.write({"type":"debug","msg":"AMG_RAW_CALLBACK","data":{"raw": raw.hex(), "debug_raw": getattr(self.amg, "debug_raw", "UNKNOWN")}})
-        
         if getattr(self.amg, "debug_raw", False):
             self.logger.write({"type":"debug","msg":"Shot_raw","data":{"raw": raw.hex()}})
-        
-        # Generate individual SHOT_RAW shot event only for actual shots (0x01 0x03 prefix)
-        # Filter out T0/START (0x01 0x05), TIMEOUT_END (0x01 0x08), ARROW_END (0x01 0x09)
-        if len(raw) >= 2 and raw[0] == 0x01 and raw[1] == 0x03:
-            device_id = self.amg.mac[-4:] if hasattr(self.amg, 'mac') else "DC1A"
-            shot_time_ms = round(ts_ns / 1_000_000, 3)
-            
-            # Create SHOT_RAW event with chronological timestamp for actual shots only
-            event_data = {
-                "type": "event",
-                "msg": "SHOT_RAW",
-                "data": {
-                    "device_id": device_id,
-                    "timestamp_ms": shot_time_ms,
-                    "signal": "shot_report",
-                    "raw": raw.hex()
-                }
-            }
-            self.logger.write(event_data)
-        
         # Track last AMG activity to help infer start button prior to T0
         self._last_amg_ns = ts_ns
 
@@ -305,208 +260,23 @@ class Bridge:
         else:
             s = sum(b*b for b in payload) / len(payload)
             amp = float(s**0.5)  # pseudo-RMS of payload bytes
-            vx = vy = vz = 0.0  # Fallback values
 
-        # Initialize sample buffer for this sensor
-        if sensor_id not in self._bt50_samples:
-            self._bt50_samples[sensor_id] = []
-            self._bt50_last_processed[sensor_id] = 0
-            # Log buffer initialization
-            self.logger.write({
-                "type": "debug",
-                "msg": "bt50_buffer_init",
-                "data": {"sensor_id": sensor_id, "init_ts_ns": ts_ns}
-            })
-        
-        # Add sample to buffer
-        self._bt50_samples[sensor_id].append((ts_ns, amp, vx, vy, vz))
-        
-        # Process buffered samples every ~2 seconds (similar to bt50_stream timing)
-        buffer = self._bt50_samples[sensor_id]
-        time_window_ns = 2_000_000_000  # 2 seconds in nanoseconds
-        
-        # Debug buffer status every 20 samples or when we have motion or always for first 5 packets
-        time_since_last = (ts_ns - self._bt50_last_processed[sensor_id]) / 1_000_000  # ms
-        ready_to_process = len(buffer) >= 40 and time_since_last > 2000
-        
-        if len(buffer) <= 5 or len(buffer) % 20 == 0 or amp > 0.1 or ready_to_process:
-            self.logger.write({
-                "type": "debug",
-                "msg": "bt50_buffer_status", 
-                "data": {
-                    "sensor_id": sensor_id,
-                    "buffer_size": len(buffer),
-                    "time_since_last_ms": round(time_since_last, 1),
-                    "ready_to_process": ready_to_process,
-                    "current_amp": round(amp, 3),
-                    "current_vx": round(vx, 3),
-                    "current_vy": round(vy, 3), 
-                    "current_vz": round(vz, 3),
-                    "last_processed_ns": self._bt50_last_processed[sensor_id]
-                }
-            })
-        
-        if len(buffer) >= 40 and (ts_ns - self._bt50_last_processed[sensor_id]) > time_window_ns:
-            self._process_bt50_buffer(sensor_id, ts_ns)
-            self._bt50_last_processed[sensor_id] = ts_ns
-    
-    def _process_bt50_buffer(self, sensor_id: str, ts_ns: int):
-        """Process buffered BT50 samples to detect discrete impact events with double tap classification"""
-        buffer = self._bt50_samples[sensor_id]
-        if not buffer:
-            return
-            
-        # Extract amplitudes and detect peaks
-        peaks = self._detect_impact_peaks(buffer)
-        impact_count = len(peaks)
-        max_amp = max([sample[1] for sample in buffer]) if buffer else 0.0
-        total_amp = sum([sample[1] for sample in buffer])
-        
-        # Classify peak patterns (single, double tap, etc.)
-        impact_classifications = self._classify_impact_patterns(peaks)
-        
-        # Calculate aggregated amplitude for detector (similar to bt50_stream avg_amp)
-        avg_amp = total_amp / len(buffer) if buffer else 0.0
-        
-        # Process through detector with aggregated amplitude
         det = self.detectors[sensor_id]
-        hit = det.update(avg_amp, dt_ms=2000.0)  # 2-second window
-        
-        # ALWAYS log buffer analysis and write detailed data for inspection
-        self.logger.write({
-            "type": "debug", 
-            "msg": "bt50_impact_analysis",
-            "data": {
-                "sensor_id": sensor_id,
-                "sample_count": len(buffer),
-                "impact_count": impact_count,
-                "avg_amp": round(avg_amp, 3),
-                "max_amp": round(max_amp, 3),
-                "detector_hit": hit,
-                "peaks_detected": len(peaks),
-                "impact_types": impact_classifications,
-                "t0_ns_set": self.t0_ns is not None,
-                "detector_state": det.state if hasattr(det, 'state') else None,
-                "detector_armed": det.armed if hasattr(det, 'armed') else None,
-                "idle_rms": round(det.idle_rms, 6),
-            }
-        })
-        
-        # ALWAYS write detailed buffer data to text file for analysis
-        self._write_detailed_buffer(sensor_id, buffer, avg_amp, impact_count, hit)
-        
-        # Generate individual impact events for each detected peak (like AMG_RAW format)
-        if impact_count > 0 and self.t0_ns is not None:
-            # Get device identifier from BT50 MAC (last 4 characters)
-            device_id = sensor_id[-4:] if len(sensor_id) >= 4 else sensor_id
-            
-            for i, (peak, classification) in enumerate(zip(peaks, impact_classifications)):
-                t_rel_ms = (ts_ns - self.t0_ns)/1e6
-                
-                # Create individual impact event similar to AMG_RAW format
-                impact_event = {
-                    "type": "event",
-                    "sensor_id": sensor_id,
-                    "device_id": device_id,  # Last 4 of MAC (12E3 for BT50)
-                    "t_rel_ms": t_rel_ms,
-                    "event_type": "BT50_RAW",  # Similar to AMG_RAW
-                    "msg": f"Impact #{i + 1} detected",  # Similar to "Shot #1 detected"
-                    "signal_description": f"Impact #{i + 1} detected",
-                    "raw_data": {
-                        "peak_amplitude": round(peak['amplitude'], 3),
-                        "frame_index": peak['frame_idx'],
-                        "peak_timestamp": round(peak['timestamp'], 1),
-                        "impact_type": classification
-                    }
-                }
-                self.logger.write(impact_event)
-        
-        # Clear processed samples (keep recent ones for overlap)
-        keep_recent = 10  # Keep last 10 samples for continuity
-        self._bt50_samples[sensor_id] = buffer[-keep_recent:] if len(buffer) > keep_recent else []
-
-    def _detect_impact_peaks(self, buffer):
-        """Detect discrete impact peaks in BT50 buffer using amplitude thresholds"""
-        peaks = []
-        if not buffer:
-            return peaks
-            
-        # Extract timestamps and amplitudes
-        frame_data = [(i, sample[0], sample[1]) for i, sample in enumerate(buffer)]
-        
-        # Find amplitude peaks above baseline threshold
-        peak_threshold = 0.5  # Minimum amplitude to consider a peak
-        for i, (frame_idx, timestamp, amplitude) in enumerate(frame_data):
-            if amplitude > peak_threshold:
-                # Check if this is a local maximum
-                is_peak = True
-                
-                # Check neighbors within 3 frames (avoid double-counting resonance)
-                for j in range(max(0, i-3), min(len(frame_data), i+4)):
-                    if j != i and frame_data[j][2] > amplitude:
-                        is_peak = False
-                        break
-                
-                if is_peak:
-                    peaks.append({
-                        'frame_idx': frame_idx,
-                        'timestamp': timestamp, 
-                        'amplitude': amplitude
-                    })
-        
-        return peaks
-
-    def _classify_impact_patterns(self, peaks):
-        """Classify impact patterns as single, double tap, triple tap, etc."""
-        if len(peaks) <= 1:
-            return ['SINGLE'] if peaks else []
-            
-        classifications = []
-        i = 0
-        
-        while i < len(peaks):
-            if i == len(peaks) - 1:
-                # Last peak - single
-                classifications.append('SINGLE')
-                i += 1
-                continue
-                
-            # Check separation to next peak
-            current_peak = peaks[i]
-            next_peak = peaks[i + 1]
-            separation_ms = next_peak['timestamp'] - current_peak['timestamp']
-            
-            # Double tap detection: 100-200ms separation with amplitude increase
-            if 100 <= separation_ms <= 200:
-                amp_ratio = next_peak['amplitude'] / max(current_peak['amplitude'], 0.1)
-                if amp_ratio >= 1.5:  # At least 50% amplitude increase
-                    classifications.extend(['DOUBLE_TAP_1', 'DOUBLE_TAP_2'])
-                    i += 2  # Skip next peak since we classified both
-                    continue
-            
-            # Resonance: 25-90ms separation  
-            elif 25 <= separation_ms <= 90:
-                classifications.append('RESONANCE')
-                i += 1
-                continue
-                
-            # Single tap (large separation)
-            else:
-                classifications.append('SINGLE')
-                i += 1
-                
-        return classifications
+        hit = det.update(amp, dt_ms=10.0)  # BT50 at 100 Hz
+        if hit and self.t0_ns is not None:
+            t_rel_ms = (ts_ns - self.t0_ns)/1e6
+            self.logger.write({"type":"event","sensor_id":sensor_id,"t_rel_ms":t_rel_ms,"msg":"Sensor_HIT","data":hit})
 
         # Periodic telemetry to confirm streaming and help calibrate
-        st = self._stream_stats.get(sensor_id)
+        st = self._stream_stats.get(plate)
         if st is None:
             st = {"n": 0, "sum": 0.0, "last_ns": ts_ns}
-            self._stream_stats[sensor_id] = st
+            self._stream_stats[plate] = st
         st["n"] += 1
         st["sum"] += amp
         if st["n"] >= 200 or (ts_ns - st["last_ns"]) > 2_000_000_000:
             avg = st["sum"] / max(1, st["n"])
-            data = {"sensor_id": sensor_id, "samples": st["n"], "avg_amp": round(avg, 3)}
+            data = {"plate": plate, "samples": st["n"], "avg_amp": round(avg, 3)}
             # Include a snapshot of parsed fields occasionally if parse succeeded recently
             if pkt is not None:
                 # keep it compact: only a few fields
@@ -515,46 +285,6 @@ class Bridge:
             st["n"] = 0
             st["sum"] = 0.0
             st["last_ns"] = ts_ns
-
-    def _write_detailed_buffer(self, sensor_id: str, buffer, avg_amp: float, impact_count: int, hit):
-        """Write detailed buffer data to text file for analysis"""
-        import datetime as dt
-        
-        timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"logs/buffer_detail_{sensor_id}_{timestamp}_amp{avg_amp:.3f}_impacts{impact_count}.txt"
-        
-        try:
-            with open(filename, 'w') as f:
-                f.write(f"# BT50 Buffer Detail Analysis\n")
-                f.write(f"# Sensor: {sensor_id}\n")
-                f.write(f"# Timestamp: {timestamp}\n")
-                f.write(f"# Buffer Size: {len(buffer)} samples\n")
-                f.write(f"# Average Amplitude: {avg_amp:.3f}\n")
-                f.write(f"# Impact Count: {impact_count}\n")
-                f.write(f"# Detector Hit: {hit}\n")
-                f.write(f"#\n")
-                f.write(f"# Format: sample_idx, ts_ns, amplitude, vx_mm_s, vy_mm_s, vz_mm_s\n")
-                f.write(f"#\n")
-                
-                for i, (ts_ns, amp, vx, vy, vz) in enumerate(buffer):
-                    f.write(f"{i:3d}, {ts_ns:15d}, {amp:8.3f}, {vx:8.3f}, {vy:8.3f}, {vz:8.3f}\n")
-                
-                f.write(f"\n# Summary Statistics:\n")
-                f.write(f"# Max Amplitude: {max(sample[1] for sample in buffer):.3f}\n")
-                f.write(f"# Non-zero Velocities: {sum(1 for _, _, vx, vy, vz in buffer if abs(vx) > 0.001 or abs(vy) > 0.001 or abs(vz) > 0.001)}\n")
-                f.write(f"# Time Span: {(buffer[-1][0] - buffer[0][0]) / 1_000_000:.1f} ms\n")
-                
-            self.logger.write({
-                "type": "info",
-                "msg": "buffer_detail_written", 
-                "data": {"sensor_id": sensor_id, "filename": filename, "samples": len(buffer)}
-            })
-        except Exception as e:
-            self.logger.write({
-                "type": "error",
-                "msg": "buffer_detail_write_failed",
-                "data": {"sensor_id": sensor_id, "error": str(e)}
-            })
 
     async def stop(self):
         self._stop = True
