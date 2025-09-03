@@ -52,7 +52,7 @@ def generate_matches(con: sqlite3.Connection, session: Optional[str], max_lag_ms
         q_t0 = q_t0.replace("WHERE  AND", "WHERE ")
         q_hit = q_hit.replace(" WHERE  AND", " WHERE") if " WHERE  AND" in q_hit else q_hit
 
-    cur = con.execute("SELECT seq, ts_ms, session_id, msg FROM events " + ("WHERE session_id = ?" if session else "") + " ORDER BY ts_ms", tuple(params))
+    cur = con.execute("SELECT seq, ts_ms, session_id, msg, data_json FROM events " + ("WHERE session_id = ?" if session else "") + " ORDER BY ts_ms", tuple(params))
     rows = cur.fetchall()
 
     # Partition into per-session lists of T0s and HITs to allow multi-session runs
@@ -61,9 +61,10 @@ def generate_matches(con: sqlite3.Connection, session: Optional[str], max_lag_ms
         sid = r["session_id"] or ""
         per_session.setdefault(sid, {"t0s": [], "hits": []})
         if r["msg"] == "T0":
-            per_session[sid]["t0s"].append((r["seq"], r["ts_ms"]))
+            # include parsed data_json for potential amg fields
+            per_session[sid]["t0s"].append((r["seq"], r["ts_ms"], r["data_json"]))
         elif r["msg"] == "HIT":
-            per_session[sid]["hits"].append((r["seq"], r["ts_ms"]))
+            per_session[sid]["hits"].append((r["seq"], r["ts_ms"], r["data_json"]))
 
     matches: List[Match] = []
     for sid, lists in per_session.items():
@@ -72,19 +73,76 @@ def generate_matches(con: sqlite3.Connection, session: Optional[str], max_lag_ms
         # Iterate hits with an index to allow advancing; simple linear scan per session
         hit_idx = 0
         for t0_seq, t0_ts in t0s:
-            # advance hit_idx until the first hit with ts_ms > t0_ts
-            while hit_idx < len(hits) and hits[hit_idx][1] <= t0_ts:
-                hit_idx += 1
-            if hit_idx >= len(hits):
-                break
-            candidate_seq, candidate_ts = hits[hit_idx]
-            offset = candidate_ts - t0_ts
-            if offset <= max_lag_ms:
-                matches.append(Match(session_id=sid, t0_seq=t0_seq, t0_ts_ms=t0_ts, hit_seq=candidate_seq, hit_ts_ms=candidate_ts, offset_ms=offset))
-                # advance to next hit for the next T0 (one-to-one mapping)
-                hit_idx += 1
+            t0_amg = None
+            try:
+                if t0_seq and isinstance(t0s[0], tuple):
+                    # t0s entries are (seq, ts_ms, data_json)
+                    pass
+            except Exception:
+                pass
+            # unpack t0 fields defensively
+            if len((t0_seq, t0_ts)) >= 2:
+                # attempt to extract amg info from the stored data_json if present
+                try:
+                    t0_data_json = t0s[0][2] if len(t0s[0]) > 2 else None
+                except Exception:
+                    t0_data_json = None
             else:
-                # no hit within the allowed window for this T0
+                t0_data_json = None
+            # First try to match by AMG fields if present (stronger match):
+            matched = False
+            # look ahead through hits within a reasonable time window to find matching amg
+            look_idx = hit_idx
+            while look_idx < len(hits):
+                h_seq, h_ts, h_data_json = hits[look_idx]
+                if h_ts <= t0_ts:
+                    look_idx += 1
+                    continue
+                offset = h_ts - t0_ts
+                if offset > max_lag_ms:
+                    break
+                # try to parse amg info from JSON fields
+                try:
+                    import json as _json
+                    t0_amg = None
+                    h_amg = None
+                    if t0s and len(t0s[0]) > 2 and t0s[0][2]:
+                        try:
+                            t0_amg = _json.loads(t0s[0][2]).get('amg')
+                        except Exception:
+                            t0_amg = None
+                    if h_data_json:
+                        try:
+                            h_amg = _json.loads(h_data_json).get('amg')
+                        except Exception:
+                            h_amg = None
+                except Exception:
+                    t0_amg = None
+                    h_amg = None
+
+                # If both sides have amg info, prefer exact shot_idx match or tail_hex match
+                if t0_amg and h_amg:
+                    try:
+                        if t0_amg.get('shot_idx') == h_amg.get('shot_idx') or t0_amg.get('tail_hex') == h_amg.get('tail_hex'):
+                            matches.append(Match(session_id=sid, t0_seq=t0_seq, t0_ts_ms=t0_ts, hit_seq=h_seq, hit_ts_ms=h_ts, offset_ms=offset))
+                            matched = True
+                            # advance main hit_idx to look after this hit for next T0
+                            hit_idx = look_idx + 1
+                            break
+                    except Exception:
+                        pass
+
+                # otherwise, if no amg info or no match, fall back to earliest-hit-in-window policy
+                if not t0_amg and not h_amg:
+                    # accept first hit within window
+                    matches.append(Match(session_id=sid, t0_seq=t0_seq, t0_ts_ms=t0_ts, hit_seq=h_seq, hit_ts_ms=h_ts, offset_ms=offset))
+                    matched = True
+                    hit_idx = look_idx + 1
+                    break
+
+                look_idx += 1
+            # if not matched, continue to next T0
+            if not matched:
                 continue
 
     return matches
