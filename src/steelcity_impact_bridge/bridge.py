@@ -34,6 +34,10 @@ class Bridge:
         # BT50 sample buffering for impact counting
         self._bt50_samples = {}  # sensor_id -> list of (ts_ns, amp, vx, vy, vz)
         self._bt50_last_processed = {}  # sensor_id -> last processed timestamp
+        
+        # String impact sequencing
+        self._string_impact_count = 0  # Total impacts in current string
+        self._last_shot_time = None  # For calculating split times
 
     async def start(self):
         # Start AMG listener with reconnect/backoff loop (only if AMG is configured)
@@ -259,6 +263,11 @@ class Bridge:
                 "data": {"raw": raw.hex(), "method": "inferred_at_t0"}
             })
         self.t0_ns = t0_ns
+        
+        # Reset string impact counter for new string
+        self._string_impact_count = 0
+        self._last_shot_time = None
+        
         self.logger.write({"type":"event","t_rel_ms":0.0,"msg":"T0","data":{"raw": raw.hex()}})
 
     def _on_amg_raw(self, ts_ns: int, raw: bytes):
@@ -338,13 +347,13 @@ class Bridge:
         # Add sample to buffer
         self._bt50_samples[sensor_id].append((ts_ns, amp, vx, vy, vz))
         
-        # Process buffered samples every ~2 seconds (similar to bt50_stream timing)
+        # Process buffered samples every ~100ms for real-time impact detection
         buffer = self._bt50_samples[sensor_id]
-        time_window_ns = 2_000_000_000  # 2 seconds in nanoseconds
+        time_window_ns = 100_000_000  # 100ms in nanoseconds
         
         # Debug buffer status every 20 samples or when we have motion or always for first 5 packets
         time_since_last = (ts_ns - self._bt50_last_processed[sensor_id]) / 1_000_000  # ms
-        ready_to_process = len(buffer) >= 40 and time_since_last > 2000
+        ready_to_process = len(buffer) >= 5 and time_since_last > 100
         
         if len(buffer) <= 5 or len(buffer) % 20 == 0 or amp > 0.1 or ready_to_process:
             self.logger.write({
@@ -363,7 +372,7 @@ class Bridge:
                 }
             })
         
-        if len(buffer) >= 40 and (ts_ns - self._bt50_last_processed[sensor_id]) > time_window_ns:
+        if len(buffer) >= 5 and (ts_ns - self._bt50_last_processed[sensor_id]) > time_window_ns:
             self._process_bt50_buffer(sensor_id, ts_ns)
             self._bt50_last_processed[sensor_id] = ts_ns
     
@@ -420,23 +429,42 @@ class Bridge:
             for i, (peak, classification) in enumerate(zip(peaks, impact_classifications)):
                 t_rel_ms = (ts_ns - self.t0_ns)/1e6
                 
+                # Increment string impact counter
+                self._string_impact_count += 1
+                
+                # Calculate split time from last shot/impact
+                split_time_ms = None
+                if self._last_shot_time is not None:
+                    split_time_ms = t_rel_ms - self._last_shot_time
+                
+                # Derive target ID from sensor device_id (12E3 -> target_1, etc.)
+                target_id = f"target_{device_id}"
+                
                 # Create individual impact event similar to AMG_RAW format
                 impact_event = {
                     "type": "event",
                     "sensor_id": sensor_id,
                     "device_id": device_id,  # Last 4 of MAC (12E3 for BT50)
+                    "target_id": target_id,  # target_12E3
                     "t_rel_ms": t_rel_ms,
-                    "event_type": "BT50_RAW",  # Similar to AMG_RAW
+                    "event_type": "impact_detected",  # Changed from BT50_RAW
                     "msg": f"Impact #{i + 1} detected",  # Similar to "Shot #1 detected"
+                    "string_impact_sequence": self._string_impact_count,
+                    "split_time_ms": split_time_ms,
                     "signal_description": f"Impact #{i + 1} detected",
+                    "impact_classification": classification,  # SINGLE, DOUBLE_TAP, etc.
                     "raw_data": {
                         "peak_amplitude": round(peak['amplitude'], 3),
                         "frame_index": peak['frame_idx'],
                         "peak_timestamp": round(peak['timestamp'], 1),
-                        "impact_type": classification
+                        "impact_type": classification,
+                        "confidence": 0.95  # Default confidence
                     }
                 }
                 self.logger.write(impact_event)
+                
+                # Update last shot time for next split calculation
+                self._last_shot_time = t_rel_ms
         
         # Clear processed samples (keep recent ones for overlap)
         keep_recent = 10  # Keep last 10 samples for continuity
