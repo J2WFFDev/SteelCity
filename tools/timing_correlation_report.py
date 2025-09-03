@@ -72,29 +72,28 @@ def generate_matches(con: sqlite3.Connection, session: Optional[str], max_lag_ms
         hits = lists["hits"]
         # Iterate hits with an index to allow advancing; simple linear scan per session
         hit_idx = 0
-        for t0_seq, t0_ts in t0s:
-            t0_amg = None
+        for t0_entry in t0s:
+            # t0_entry is (seq, ts_ms, data_json)
             try:
-                if t0_seq and isinstance(t0s[0], tuple):
-                    # t0s entries are (seq, ts_ms, data_json)
-                    pass
+                t0_seq = t0_entry[0]
+                t0_ts = t0_entry[1]
+                t0_data_json = t0_entry[2] if len(t0_entry) > 2 else None
             except Exception:
-                pass
-            # unpack t0 fields defensively
-            if len((t0_seq, t0_ts)) >= 2:
-                # attempt to extract amg info from the stored data_json if present
-                try:
-                    t0_data_json = t0s[0][2] if len(t0s[0]) > 2 else None
-                except Exception:
-                    t0_data_json = None
-            else:
-                t0_data_json = None
+                # malformed entry; skip
+                continue
             # First try to match by AMG fields if present (stronger match):
             matched = False
             # look ahead through hits within a reasonable time window to find matching amg
             look_idx = hit_idx
             while look_idx < len(hits):
-                h_seq, h_ts, h_data_json = hits[look_idx]
+                h_entry = hits[look_idx]
+                try:
+                    h_seq = h_entry[0]
+                    h_ts = h_entry[1]
+                    h_data_json = h_entry[2] if len(h_entry) > 2 else None
+                except Exception:
+                    look_idx += 1
+                    continue
                 if h_ts <= t0_ts:
                     look_idx += 1
                     continue
@@ -106,9 +105,9 @@ def generate_matches(con: sqlite3.Connection, session: Optional[str], max_lag_ms
                     import json as _json
                     t0_amg = None
                     h_amg = None
-                    if t0s and len(t0s[0]) > 2 and t0s[0][2]:
+                    if t0_data_json:
                         try:
-                            t0_amg = _json.loads(t0s[0][2]).get('amg')
+                            t0_amg = _json.loads(t0_data_json).get('amg')
                         except Exception:
                             t0_amg = None
                     if h_data_json:
