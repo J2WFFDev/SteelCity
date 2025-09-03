@@ -12,6 +12,21 @@ class NdjsonLogger:
         self._fh: Optional[IO[str]] = None
         self._rot_day: Optional[str] = None
         self._path: Optional[pathlib.Path] = None
+        # Logging mode: 'regular' or 'verbose'. In regular mode, debug-level
+        # events can be filtered unless explicitly whitelisted. This can be
+        # configured via environment vars or by passing attributes after
+        # construction (bridge passes config through).
+        self.mode: str = os.getenv("LOG_MODE", "regular")
+        # Whitelist of message names (obj['msg']) that should be emitted even
+        # while in regular mode. Comma-separated env var or set directly.
+        wl = os.getenv("LOG_VERBOSE_WHITELIST", "")
+        self.verbose_whitelist = set([s.strip() for s in wl.split(",") if s.strip()])
+        # Threshold under which a reported current_amp is treated as zero.
+        # Can be overridden via env var LOG_CURRENT_AMP_THRESHOLD (e.g. 0.001).
+        try:
+            self.current_amp_threshold = float(os.getenv("LOG_CURRENT_AMP_THRESHOLD", "1e-6"))
+        except Exception:
+            self.current_amp_threshold = 1e-6
         # Observability: per-run identifiers
         self.session_id: str = os.getenv("SESSION_ID") or uuid.uuid4().hex[:12]
         try:
@@ -61,6 +76,50 @@ class NdjsonLogger:
             pass
 
     def write(self, obj: dict):
+        # Filtering: when in 'regular' mode, drop events that are debug-level
+        # (type == 'debug') unless the message is explicitly whitelisted.
+        try:
+            # In regular mode we apply two kinds of suppression:
+            # 1) suppress frequent empty heartbeat status lines: {"type":"status","msg":"alive","data":{"sensors": []}}
+            # 2) suppress debug-level lines when they carry a "current_amp" that is effectively zero.
+            if self.mode == "regular":
+                typ = obj.get("type")
+                msg = obj.get("msg")
+                data = obj.get("data") if isinstance(obj.get("data"), dict) else {}
+
+                # Suppress empty heartbeats (no sensors) to reduce noise in regular runs
+                if typ == "status" and msg == "alive":
+                    sensors = data.get("sensors")
+                    if isinstance(sensors, list) and len(sensors) == 0:
+                        return
+
+                # For debug events apply whitelist *unless* a numeric current_amp is present and is zeroish.
+                if typ == "debug":
+                    ca = data.get("current_amp")
+
+                    # Explicit suppression for high-rate bt50 buffer status messages in regular mode
+                    # These are noisy by nature; allow only when explicitly whitelisted.
+                    if msg == "bt50_buffer_status" and not (msg and (msg in self.verbose_whitelist)):
+                        return
+
+                    # If current_amp is present and numeric, treat values <= threshold as zero and suppress.
+                    if ca is not None:
+                        try:
+                            if abs(float(ca)) <= float(self.current_amp_threshold):
+                                return
+                            else:
+                                # non-zero meaningful amplitude -> allow regardless of whitelist
+                                pass
+                        except Exception:
+                            # fall through to whitelist logic if conversion fails
+                            pass
+
+                    # If we get here, no numeric current_amp was present (or conversion failed): only allow if whitelisted
+                    if not (msg and (msg in self.verbose_whitelist)):
+                        return
+        except Exception:
+            # If filtering fails for any reason, fall back to writing the event
+            pass
         self.seq += 1
         # Monotonic clock (ms) for stable deltas
         obj.setdefault("ts_ms", time.monotonic() * 1000.0)
