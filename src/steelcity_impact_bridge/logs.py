@@ -124,6 +124,37 @@ class NdjsonLogger:
         except Exception:
             # If filtering fails for any reason, fall back to writing the event
             pass
+        # If the event contains a raw hex payload from the AMG/timer, try to
+        # decode it into friendly fields so logs are easier to consume.
+        try:
+            data = obj.get("data") if isinstance(obj.get("data"), dict) else {}
+            hex_payload = data.get("hex") or data.get("payload")
+            if isinstance(hex_payload, str) and hex_payload:
+                try:
+                    # Prefer absolute import; fall back to relative if needed.
+                    try:
+                        from steelcity_impact_bridge.amg import parse_frame_hex
+                    except Exception:
+                        from .amg import parse_frame_hex
+                    f = parse_frame_hex(hex_payload)
+                    if f:
+                        amg = {
+                            "shot_idx": int(f.get("b2")),
+                            "T_s": float(f.get("p1", 0)) / 100.0,
+                            "split_s": float(f.get("p2", 0)) / 100.0,
+                            "first_s": float(f.get("p3", 0)) / 100.0,
+                            "tail_hex": f"0x{int(f.get('tail')):02x}",
+                            "raw_hex": f.get("hex"),
+                        }
+                        # Attach decoded AMG data under data['amg'] and keep raw hex
+                        data["amg"] = amg
+                        obj["data"] = data
+                except Exception:
+                    # Non-fatal: if AMG parsing fails, continue and write raw event
+                    pass
+        except Exception:
+            pass
+
         self.seq += 1
         # Monotonic clock (ms) for stable deltas
         obj.setdefault("ts_ms", time.monotonic() * 1000.0)
