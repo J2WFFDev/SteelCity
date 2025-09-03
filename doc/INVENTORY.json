@@ -1,0 +1,127 @@
+[{
+  "path": "doc/HANDOFF.md",
+  "section": "Docs",
+  "description": "Primary runbook and operational handoff for the Raspberry Pi bridge. Contains milestone status, runtime instructions, configuration and verification steps, troubleshooting, and roadmaps.",
+  "related": ["config.example.yaml", "scripts/*", "etc/*", "doc/INGEST.md", "README.md"]
+},
+{
+  "path": "doc/INGEST.md",
+  "section": "Docs",
+  "description": "Describes streaming ingestion into SQLite and usage of the ingest follower and batch tools.",
+  "related": ["tools/ingest_follow.py", "tools/ingest_sqlite.py", "tools/sqlite_reports.py", "scripts/install_ingest_service.sh", "etc/ingest.user.service"]
+},
+{
+  "path": "tools/watch_events.py",
+  "section": "Tools",
+  "description": "Follow decoded CSV and emit event summaries (moved CLI from doc/INGEST.md).",
+  "cli": {
+    "args": [
+      {"name": "decoded_csv", "flags": ["decoded_csv"], "type": "positional", "help": "Path to decoded CSV (from wtvb_decode_5561.py)"},
+      {"name": "--thr", "flags": ["--thr"], "type": "float", "default": 120.0},
+      {"name": "--gap-s", "flags": ["--gap-s"], "type": "float", "default": 0.20},
+      {"name": "--hz", "flags": ["--hz"], "type": "float", "default": 25.0},
+      {"name": "--from-start", "flags": ["--from-start"], "type": "bool", "action": "store_true"},
+      {"name": "--exit-on-eof", "flags": ["--exit-on-eof"], "type": "bool", "action": "store_true"}
+    ]
+  },
+  "related": ["tools/ingest_follow.py", "tools/ingest_sqlite.py", "tools/sqlite_reports.py"]
+},
+{
+  "path": "tools/watch_amg.py",
+  "section": "Tools",
+  "description": "Pretty-print AMG NDJSON events (moved CLI from doc/HANDOFF_20250901.md).",
+  "cli": {
+    "args": [
+      {"name": "--raw", "flags": ["--raw"], "type": "bool", "action": "store_true"},
+      {"name": "--pretty", "flags": ["--pretty"], "type": "bool", "action": "store_true"},
+      {"name": "--file", "flags": ["--file"], "type": "str"},
+      {"name": "--from-start", "flags": ["--from-start"], "type": "bool", "action": "store_true"}
+    ]
+  },
+  "related": ["tools/watch_amg.py", "src/steelcity_impact_bridge/ble/amg.py"]
+},
+{
+  "path": "tools/wtvb_offline_decode.py",
+  "section": "Tools",
+  "description": "Offline decoder: convert WTVB sniff CSV to decoded CSV (moved CLI from doc/AMG_SIGNALS.md).",
+  "cli": {
+    "args": [
+      {"name": "in_csv", "flags": ["in_csv"], "type": "positional"},
+      {"name": "out_csv", "flags": ["out_csv"], "type": "positional"}
+    ]
+  },
+  "related": ["tools/wtvb_offline_decode.py", "tools/wtvb_offline_dump.py"]
+},
+{
+  "path": "tools/wtvb_offline_dump.py",
+  "section": "Tools",
+  "description": "Dump WTVB sniff CSV (moved CLI from doc/project context.md).",
+  "cli": {
+    "args": [
+      {"name": "wtvb_sniff_csv", "flags": ["wtvb_sniff_csv"], "type": "positional"}
+    ]
+  },
+  "related": ["tools/wtvb_offline_dump.py"]
+},
+{
+  "path": "tools/wtvb_send.py",
+  "section": "Tools",
+  "description": "BLE writer utility for WTVB devices (moved CLI from doc/VENV_SETUP.md).",
+  "cli": {
+    "args": [
+      {"name": "--adapter", "flags": ["--adapter"], "type": "str", "default": "hci0"},
+      {"name": "--mac", "flags": ["--mac"], "type": "str", "required": true},
+      {"name": "--uuid", "flags": ["--uuid"], "type": "str", "default": "0000ffe9-0000-1000-8000-00805f9a34fb"},
+      {"name": "--hex", "flags": ["--hex"], "type": "str"},
+      {"name": "--ascii", "flags": ["--ascii"], "type": "str"}
+    ]
+    ,
+    "mutually_exclusive_groups": [
+      {"args": ["--hex", "--ascii"], "required": true}
+    ]
+  },
+  "related": ["tools/wtvb_send.py"]
+},
+{
+  "path": "doc/schema_v1.json",
+  "section": "Docs",
+  "description": "JSON Schema for NDJSON v1 event lines produced by the bridge. Describes required fields and types.",
+  "related": ["tools/validate_logs.py", "tools/sqlite_reports.py", "src/steelcity_impact_bridge/logs.py"]
+},
+{
+  "path": "README.md",
+  "section": "Top-level",
+  "description": "Repository landing document with quickstart and project overview.",
+  "related": ["doc/*", "scripts/*"]
+},
+{
+  "path": "QUICK_REFERENCE.md",
+  "section": "Top-level",
+  "description": "Short operational cheat-sheet — commands and common flows (start, stop, tail logs, install user service).",
+  "related": ["scripts/*.sh", "doc/HANDOFF.md"]
+},
+{
+  "path": "TESTING_PROTOCOL.md",
+  "section": "Top-level",
+  "description": "Formalized testing protocols for the bridge (BT50-only, combined tests, expected event sequences).",
+  "related": ["tools/*", "scripts/timed_bridge_run.sh", "doc/HANDOFF.md"]
+},
+{
+  "path": "HANDOFF_SESSION.md",
+  "section": "Top-level",
+  "description": "Session-specific handoff notes and change logs.",
+  "related": []
+},
+{
+  "path": "HANDOFF_2025-09-03.md",
+  "section": "Top-level",
+  "description": "Recent handoff notes capturing status and decisions.",
+  "related": []
+},
+{
+  "path": "config.example.yaml",
+  "section": "Config",
+  "description": "Example configuration showing expected fields and device addresses.",
+  "related": ["config.yaml"]
+  }
+]
