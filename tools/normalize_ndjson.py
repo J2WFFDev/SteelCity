@@ -65,6 +65,23 @@ def normalize_obj(o: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(sid, str):
             o['sensor_id'] = sid
 
+    # Canonicalize hex-like payload fields into data['hex'] so downstream
+    # consumers (AMG parser, reports) can rely on a single field.
+    # Common names: 'hex', 'payload', 'frame', 'payload_hex', 'raw'
+    for candidate in ('hex', 'payload', 'frame', 'payload_hex', 'raw'):
+        v = data.get(candidate) or o.get(candidate)
+        if isinstance(v, str) and v.strip():
+            # normalize common 0x prefix and spaces
+            s = v.strip()
+            if s.lower().startswith('0x'):
+                s = s[2:]
+            s = s.replace(' ', '')
+            # A reasonable hex payload length for AMG frames is 28 chars (14 bytes)
+            # but we accept other lengths too; only keep if it looks hex-like.
+            if all(c in '0123456789abcdefABCDEF' for c in s):
+                data['hex'] = s
+                break
+
     # write normalized flag for auditing
     o.setdefault('normalized', True)
     o['data'] = data
