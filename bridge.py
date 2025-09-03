@@ -13,6 +13,15 @@ class Bridge:
     def __init__(self, cfg: AppCfg):
         self.cfg = cfg
         self.logger = NdjsonLogger(cfg.logging.dir, cfg.logging.file_prefix)
+        # Apply logging mode and whitelist from config if present
+        try:
+            if hasattr(cfg.logging, 'mode'):
+                self.logger.mode = cfg.logging.mode or self.logger.mode
+            if hasattr(cfg.logging, 'verbose_whitelist') and cfg.logging.verbose_whitelist:
+                # merge any configured whitelist with env-derived whitelist
+                self.logger.verbose_whitelist.update(cfg.logging.verbose_whitelist)
+        except Exception:
+            pass
         self.t0_ns: Optional[int] = None
         self._last_amg_ns: Optional[int] = None
         self._pending_session: bool = False
@@ -50,7 +59,7 @@ class Bridge:
                     # Log intent to connect
                     self.logger.write({
                         "type": "info",
-                        "msg": "Timer_connecting",
+                        "msg": "Bridge_connecting_Timer",
                         "data": {
                             "adapter": self.cfg.amg.adapter,
                             "target": self.cfg.amg.mac or self.cfg.amg.name,
@@ -142,7 +151,7 @@ class Bridge:
 
         # Start BT50 sensor loops (with reconnect)
         for s in self.cfg.sensors:
-            task = asyncio.create_task(self._bt50_loop(s.plate, s.adapter, s.mac, s.notify_uuid, s.config_uuid))
+            task = asyncio.create_task(self._bt50_loop(s.sensor, s.adapter, s.mac, s.notify_uuid, s.config_uuid))
             self._bt_tasks.append(task)
 
         # Periodic status
@@ -163,7 +172,7 @@ class Bridge:
         # Pull per-sensor config for backoff and keepalive/idle
         scfg = None
         for s in self.cfg.sensors:
-            if s.plate == sensor_id and s.mac == mac:
+            if s.sensor == sensor_id and s.mac == mac:
                 scfg = s
                 break
         reconnect_initial = float(getattr(scfg, "reconnect_initial_sec", 2.0) if scfg else 2.0)
@@ -246,7 +255,7 @@ class Bridge:
 
     def _on_amg_raw(self, ts_ns: int, raw: bytes):
         if getattr(self.amg, "debug_raw", False):
-            self.logger.write({"type":"debug","msg":"Shot_raw","data":{"raw": raw.hex()}})
+            self.logger.write({"type":"debug","msg":"shot_raw","data":{"raw": raw.hex()}})
         # Track last AMG activity to help infer start button prior to T0
         self._last_amg_ns = ts_ns
 

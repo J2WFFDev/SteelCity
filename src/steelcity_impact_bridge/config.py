@@ -55,6 +55,12 @@ class DetectorCfg:
 class LoggingCfg:
     dir: str = "./logs"
     file_prefix: str = "bridge"
+    # Logging mode controls verbosity. 'regular' (default) filters debug
+    # messages unless whitelisted; 'verbose' emits everything.
+    mode: str = "regular"
+    # Optional list of message names (strings) that should be emitted even in
+    # regular mode. Example: ["Shot_raw","bt50_buffer_status"].
+    verbose_whitelist: Optional[List[str]] = None
 
 @dataclass
 class AppCfg:
@@ -67,7 +73,15 @@ def load_config(path: str) -> AppCfg:
     with open(path, "r", encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     amg = AmgCfg(**raw.get("amg", {}))
-    sensors = [SensorCfg(**s) for s in raw.get("sensors", [])]
+    # Backwards-compat: older config files used the key 'sensor' for the
+    # plate name. If present, map it to 'plate' so SensorCfg accepts it.
+    sensors_raw = []
+    for s in raw.get("sensors", []):
+        if isinstance(s, dict) and "sensor" in s and "plate" not in s:
+            s = dict(s)
+            s["plate"] = s.pop("sensor")
+        sensors_raw.append(s)
+    sensors = [SensorCfg(**s) for s in sensors_raw]
     det = DetectorCfg(**raw.get("detector", {}))
     log = LoggingCfg(**raw.get("logging", {}))
     return AppCfg(amg=amg, sensors=sensors, detector=det, logging=log)

@@ -103,20 +103,24 @@ class NdjsonLogger:
                         return
 
                     # If current_amp is present and numeric, treat values <= threshold as zero and suppress.
+                    # If it's greater than the threshold, allow the event regardless of whitelist.
                     if ca is not None:
                         try:
                             if abs(float(ca)) <= float(self.current_amp_threshold):
                                 return
                             else:
                                 # non-zero meaningful amplitude -> allow regardless of whitelist
+                                # Skip further whitelist checks by proceeding to write.
                                 pass
                         except Exception:
                             # fall through to whitelist logic if conversion fails
                             pass
 
-                    # If we get here, no numeric current_amp was present (or conversion failed): only allow if whitelisted
-                    if not (msg and (msg in self.verbose_whitelist)):
-                        return
+                    # If we get here, either no numeric current_amp was present or conversion failed:
+                    # only allow if whitelisted.
+                    if ca is None:
+                        if not (msg and (msg in self.verbose_whitelist)):
+                            return
         except Exception:
             # If filtering fails for any reason, fall back to writing the event
             pass

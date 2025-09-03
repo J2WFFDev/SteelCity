@@ -13,6 +13,14 @@ class Bridge:
     def __init__(self, cfg: AppCfg):
         self.cfg = cfg
         self.logger = NdjsonLogger(cfg.logging.dir, cfg.logging.file_prefix)
+        # Apply logging mode and whitelist from config if present
+        try:
+            if hasattr(cfg.logging, 'mode'):
+                self.logger.mode = cfg.logging.mode or self.logger.mode
+            if hasattr(cfg.logging, 'verbose_whitelist') and cfg.logging.verbose_whitelist:
+                self.logger.verbose_whitelist.update(cfg.logging.verbose_whitelist)
+        except Exception:
+            pass
         self.t0_ns: Optional[int] = None
         self._last_amg_ns: Optional[int] = None
         self._pending_session: bool = False

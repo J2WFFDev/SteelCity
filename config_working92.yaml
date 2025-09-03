@@ -2,7 +2,7 @@
 amg:
   adapter: "hci0"
   mac: "60:09:C3:1F:DC:1A"
-  name: 'AMG_timer_DC1A'
+  name: "AMG_Timer_DC1A"
   start_uuid: "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
   write_uuid: "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
   # Optional initial commands to send right after connect
@@ -14,7 +14,7 @@ amg:
     test_raw_aa10:
       hex: "AA-10"
 sensors:
-  - sensor: "Sensor_12E3"
+  - sensor: "sensor_P1"
     adapter: "hci0"
     mac: "F8:FE:92:31:12:E3"
     notify_uuid: "0000ffe4-0000-1000-8000-00805f9a34fb"
@@ -34,10 +34,3 @@ detector:
 logging:
   dir: "./logs"
   file_prefix: "bridge"
-  # Logging mode: 'regular' will suppress debug-level events unless
-  # explicitly listed below. Set to 'verbose' to emit all debug events.
-  mode: "regular"
-  # List debug msg names to allow in regular mode. Adjust as desired.
-  verbose_whitelist:
-    - "Shot_raw"
-    - "bt50_buffer_status"
