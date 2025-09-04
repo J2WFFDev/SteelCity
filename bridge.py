@@ -36,7 +36,61 @@ class Bridge:
         self._bt50_samples = {}  # sensor_id -> list of (ts_ns, amp, vx, vy, vz)
         self._bt50_last_processed = {}  # sensor_id -> last processed timestamp
 
+    async def _check_process_conflicts(self):
+        """Check for competing bridge processes that could cause Bluetooth conflicts"""
+        try:
+            import subprocess
+            # Check for bridge-related processes
+            result = subprocess.run(
+                ["ps", "aux"], 
+                capture_output=True, 
+                text=True, 
+                timeout=5
+            )
+            
+            if result.returncode == 0:
+                lines = result.stdout.split('\n')
+                bridge_processes = []
+                
+                for line in lines:
+                    if any(pattern in line.lower() for pattern in ['bridge.py', 'run_bridge', 'minimal_bridge', 'steelcity']):
+                        if 'grep' not in line.lower() and 'ps aux' not in line.lower():
+                            bridge_processes.append(line.strip())
+                
+                if bridge_processes:
+                    self.logger.write({
+                        "type": "warning",
+                        "msg": "Competing_processes_detected",
+                        "data": {
+                            "count": len(bridge_processes),
+                            "processes": bridge_processes[:3],  # Log first 3 processes
+                            "recommendation": "Kill competing processes to avoid Bluetooth conflicts"
+                        }
+                    })
+                else:
+                    self.logger.write({
+                        "type": "info",
+                        "msg": "Process_check_passed",
+                        "data": {"competing_processes": 0}
+                    })
+            else:
+                self.logger.write({
+                    "type": "warning", 
+                    "msg": "Process_check_failed",
+                    "data": {"error": "could_not_run_ps_command"}
+                })
+                
+        except Exception as e:
+            self.logger.write({
+                "type": "warning",
+                "msg": "Process_check_error",
+                "data": {"error": str(e), "type": type(e).__name__}
+            })
+
     async def start(self):
+        # PRE-FLIGHT: Check for competing bridge processes that could cause conflicts
+        await self._check_process_conflicts()
+        
         # Start AMG listener with reconnect/backoff loop (only if AMG is configured)
         async def _amg_loop():
             backoff = max(0.0, float(self.cfg.amg.reconnect_initial_sec))
@@ -139,9 +193,29 @@ class Bridge:
                 await asyncio.sleep(min(max_b, backoff) + (jitter if jitter > 0 else 0))
                 backoff = min(max_b, max(1.0, backoff * 1.7))
 
+        # SEQUENTIAL CONNECTION STRATEGY to avoid "Operation already in progress" errors
+        self.logger.write({
+            "type": "info",
+            "msg": "Bridge_startup",
+            "data": {"strategy": "sequential_connections", "amg_first": True}
+        })
+
         # Only start AMG loop if AMG is configured (has MAC or name)
         if self.cfg.amg.mac or self.cfg.amg.name:
+            self.logger.write({
+                "type": "info",
+                "msg": "AMG_connecting",
+                "data": {"phase": "1_amg_first"}
+            })
             asyncio.create_task(_amg_loop())
+            
+            # Wait 2 seconds before starting BT50 connections to avoid Bluetooth conflicts
+            self.logger.write({
+                "type": "info",
+                "msg": "Sequential_delay",
+                "data": {"wait_seconds": 2.0, "reason": "avoid_bluetooth_conflicts"}
+            })
+            await asyncio.sleep(2.0)
         else:
             self.logger.write({
                 "type": "info",
@@ -149,7 +223,12 @@ class Bridge:
                 "data": {"reason": "no_mac_or_name_configured"}
             })
 
-        # Start BT50 sensor loops (with reconnect)
+        # Start BT50 sensor loops AFTER AMG connection attempt  
+        self.logger.write({
+            "type": "info",
+            "msg": "BT50_connecting",
+            "data": {"phase": "2_bt50_second", "sensor_count": len(self.cfg.sensors)}
+        })
         for s in self.cfg.sensors:
             task = asyncio.create_task(self._bt50_loop(s.sensor, s.adapter, s.mac, s.notify_uuid, s.config_uuid))
             self._bt_tasks.append(task)
@@ -338,9 +417,29 @@ class Bridge:
     
     def _process_bt50_buffer(self, sensor_id: str, ts_ns: int):
         """Process buffered BT50 samples to detect discrete impact events with double tap classification"""
+        # Debug: Function called successfully
+        self.logger.write({
+            "type": "debug",
+            "msg": "PROCESSING_BUFFER_CALLED",
+            "data": {"sensor_id": sensor_id}
+        })
+        
         buffer = self._bt50_samples[sensor_id]
         if not buffer:
             return
+        # Log buffer samples for strip chart analysis
+        self.logger.write({
+            "type": "debug",
+            "msg": "bt50_buffer_samples",
+            "data": {
+                "sensor_id": sensor_id,
+                "sample_count": len(buffer),
+                "samples": [
+                    {"ts": ts, "amp": amp, "vx": vx, "vy": vy, "vz": vz}
+                    for (ts, amp, vx, vy, vz) in buffer[:50]
+                ]
+            }
+        })
             
         # Extract amplitudes and detect peaks
         peaks = self._detect_impact_peaks(buffer)
@@ -358,6 +457,13 @@ class Bridge:
         det = self.detectors[sensor_id]
         hit = det.update(avg_amp, dt_ms=2000.0)  # 2-second window
         
+        # Count impacts by intensity level
+        intensity_counts = {'LIGHT': 0, 'MEDIUM': 0, 'HEAVY': 0}
+        peak_amplitudes = []
+        for peak in peaks:
+            intensity_counts[peak['intensity']] += 1
+            peak_amplitudes.append(peak['amplitude'])
+        
         # ALWAYS log buffer analysis and write detailed data for inspection
         self.logger.write({
             "type": "debug", 
@@ -371,6 +477,10 @@ class Bridge:
                 "detector_hit": hit,
                 "peaks_detected": len(peaks),
                 "impact_types": impact_classifications,
+                "intensity_counts": intensity_counts,
+                "peak_amplitudes": peak_amplitudes,
+                "noise_samples": len([s for s in buffer if s[1] < 5.0]),
+                "above_threshold": len([s for s in buffer if s[1] >= 10.0]),
                 "t0_ns_set": self.t0_ns is not None,
                 "detector_state": det.state if hasattr(det, 'state') else None,
                 "detector_armed": det.armed if hasattr(det, 'armed') else None,
@@ -402,7 +512,8 @@ class Bridge:
                         "peak_amplitude": round(peak['amplitude'], 3),
                         "frame_index": peak['frame_idx'],
                         "peak_timestamp": round(peak['timestamp'], 1),
-                        "impact_type": classification
+                        "impact_type": classification,
+                        "intensity": peak['intensity']
                     }
                 }
                 self.logger.write(impact_event)
@@ -420,8 +531,9 @@ class Bridge:
         # Extract timestamps and amplitudes
         frame_data = [(i, sample[0], sample[1]) for i, sample in enumerate(buffer)]
         
-        # Find amplitude peaks above baseline threshold
-        peak_threshold = 0.5  # Minimum amplitude to consider a peak
+        # Find amplitude peaks above baseline threshold (based on observed data)
+        # Background noise: 1-4, Light impacts: 10-15, Medium: 15-40, Heavy: >40
+        peak_threshold = 10.0  # Minimum amplitude to consider a real impact
         for i, (frame_idx, timestamp, amplitude) in enumerate(frame_data):
             if amplitude > peak_threshold:
                 # Check if this is a local maximum
@@ -434,10 +546,19 @@ class Bridge:
                         break
                 
                 if is_peak:
+                    # Classify impact intensity based on amplitude
+                    if amplitude >= 40.0:
+                        intensity = 'HEAVY'
+                    elif amplitude >= 15.0:
+                        intensity = 'MEDIUM'
+                    else:
+                        intensity = 'LIGHT'
+                    
                     peaks.append({
                         'frame_idx': frame_idx,
                         'timestamp': timestamp, 
-                        'amplitude': amplitude
+                        'amplitude': amplitude,
+                        'intensity': intensity
                     })
         
         return peaks

@@ -119,7 +119,8 @@ class Bt50Client:
         return None
 
     async def start(self):
-        # First, try a direct connect by MAC to avoid triggering scans on BlueZ
+        # PROVEN DIRECT CONNECTION METHOD - try direct connect by MAC first to avoid discovery scans
+        # This approach worked successfully in minimal bridge testing
         tried_direct = False
         try:
             self.client = BleakClient(self.mac, device=self.adapter)
@@ -128,11 +129,13 @@ class Bt50Client:
         except Exception:
             # Ensure we close any half-open state before falling back to discovery
             try:
-                await self.client.disconnect()  # type: ignore[func-returns-value]
+                if self.client:
+                    await self.client.disconnect()  # type: ignore[func-returns-value]
             except Exception:
                 pass
             self.client = None
 
+        # FALLBACK: If direct connection failed, try discovery-based connection
         if self.client is None:
             # Resolve device presence before connecting to avoid BleakDeviceNotFoundError
             dev = await self._discover_device()
