@@ -47,13 +47,12 @@ class MinimalBridge:
         self.seq_counter += 1
         now = time.time()
         
+        # Per logging policy: do not include machine timestamps (ts_ms/t_iso).
         log_entry = {
             "type": msg_type,
             "msg": message,
             "data": data or {},
-            "ts_ms": now * 1000,
             "hms": datetime.fromtimestamp(now).strftime("%H:%M:%S.%f")[:-3],
-            "t_iso": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
             "seq": self.seq_counter,
             "schema": "minimal_v1",
             "session_id": self.session_id

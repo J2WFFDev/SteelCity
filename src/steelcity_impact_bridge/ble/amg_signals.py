@@ -19,7 +19,9 @@ def classify_signals(b: bytes) -> List[str]:
     # we tentatively map 0x09 to ARROW_END and 0x08 to TIMEOUT_END.
     # These will be tuned as we gather more labeled captures.
     if len(b) >= 2 and b[0] == 0x01:
-        if b[1] == 0x09:
+        if b[1] == 0x03:
+            out.append("SHOT_RAW")  # Individual shot detection
+        elif b[1] == 0x09:
             out.append("ARROW_END")
         elif b[1] == 0x08:
             out.append("TIMEOUT_END")

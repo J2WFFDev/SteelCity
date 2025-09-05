@@ -4,14 +4,20 @@ import os, json, time, pathlib, uuid
 from typing import Optional, IO
 
 class NdjsonLogger:
-    def __init__(self, directory: str, file_prefix: str):
+    def __init__(self, directory: str, file_prefix: str, *, dual_file: bool = False, debug_subdir: Optional[str] = None):
         self.dir = pathlib.Path(directory)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.prefix = file_prefix
+        # Dual-file config
+        self.dual_file = bool(dual_file)
+        self.debug_subdir = debug_subdir or "debug"
+        self._debug_dir: Optional[pathlib.Path] = None
         self.seq = 0
         self._fh: Optional[IO[str]] = None
         self._rot_day: Optional[str] = None
         self._path: Optional[pathlib.Path] = None
+        self._debug_fh: Optional[IO[str]] = None
+        self._debug_path: Optional[pathlib.Path] = None
         # Logging mode: 'regular' or 'verbose'. In regular mode, debug-level
         # events can be filtered unless explicitly whitelisted. This can be
         # configured via environment vars or by passing attributes after
@@ -33,7 +39,11 @@ class NdjsonLogger:
             self.pid: int = os.getpid()
         except Exception:
             self.pid = -1
-        self.rotate()
+        # NOTE: This logger no longer emits machine timestamps (`ts_ms` or
+        # `t_iso`). Only the human-friendly `hms` field is written for each
+        # record. Configuration flags to include/exclude those fields were
+        # removed to keep logs compact and consistent across all record types.
+    self.rotate()
 
     def rotate(self):
         # Close previous handle
@@ -43,6 +53,13 @@ class NdjsonLogger:
             except Exception:
                 pass
             self._fh = None
+        # Close debug handle if present
+        if self._debug_fh:
+            try:
+                self._debug_fh.close()
+            except Exception:
+                pass
+            self._debug_fh = None
 
         # Create a time-coded filename, e.g., bridge_YYYYMMDD_HHMMSS.ndjson
         now = time.time()
@@ -51,10 +68,24 @@ class NdjsonLogger:
         path = self.dir / f"{self.prefix}_{stamp}.ndjson"
         self._fh = open(path, "a", buffering=1, encoding="utf-8")
         self._path = path
+        # Prepare debug path/handle when dual_file enabled
+        if self.dual_file:
+            # Debug directory under base dir
+            self._debug_dir = self.dir / self.debug_subdir
+            try:
+                self._debug_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                self._debug_dir = self.dir
+            dpath = self._debug_dir / f"{self.prefix}_debug_{stamp}.ndjson"
+            try:
+                self._debug_fh = open(dpath, "a", buffering=1, encoding="utf-8")
+                self._debug_path = dpath
+            except Exception:
+                self._debug_fh = None
         self._rot_day = day
 
         # Maintain a daily alias so existing tools (expecting prefix_YYYYMMDD.ndjson) keep working
-        alias = self.dir / f"{self.prefix}_{day}.ndjson"
+    alias = self.dir / f"{self.prefix}_{day}.ndjson"
         try:
             if alias.exists() or alias.is_symlink():
                 try:
@@ -71,6 +102,25 @@ class NdjsonLogger:
                     # As a last resort, create/truncate alias to exist (not kept in sync)
                     with open(alias, "a", encoding="utf-8"):
                         pass
+        # Also create debug alias if dual file
+        if self.dual_file and self._debug_path:
+            try:
+                debug_alias = self._debug_dir / f"{self.prefix}_debug_{day}.ndjson"
+                if debug_alias.exists() or debug_alias.is_symlink():
+                    try:
+                        debug_alias.unlink()
+                    except Exception:
+                        pass
+                try:
+                    os.link(self._debug_path, debug_alias)
+                except Exception:
+                    try:
+                        os.symlink(str(self._debug_path), debug_alias)
+                    except Exception:
+                        with open(debug_alias, "a", encoding="utf-8"):
+                            pass
+            except Exception:
+                pass
         except Exception:
             # Non-fatal if alias creation fails
             pass
@@ -124,7 +174,7 @@ class NdjsonLogger:
         except Exception:
             # If filtering fails for any reason, fall back to writing the event
             pass
-        # If the event contains a raw hex payload from the AMG/timer, try to
+    # If the event contains a raw hex payload from the AMG/timer, try to
         # decode it into friendly fields so logs are easier to consume.
         try:
             data = obj.get("data") if isinstance(obj.get("data"), dict) else {}
@@ -155,23 +205,41 @@ class NdjsonLogger:
         except Exception:
             pass
 
-        self.seq += 1
+    self.seq += 1
         # Monotonic clock (ms) for stable deltas
-        obj.setdefault("ts_ms", time.monotonic() * 1000.0)
-        # Human-friendly local time HH:MM:SS.mmm
+        # Allow suppression of ts_ms/t_iso for event records when configured
         now = time.time()
         lt = time.localtime(now)
         msec = int((now % 1.0) * 1000)
+        # Always include human-friendly local time for readability
         hms = time.strftime("%H:%M:%S", lt) + f".{msec:03d}"
         obj.setdefault("hms", hms)
-        # ISO UTC wall clock for cross-host correlation
-        isoutc = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now)) + f".{msec:03d}Z"
-        obj.setdefault("t_iso", isoutc)
+        # Never include machine timestamps in any record. If callers have
+        # accidentally attached `ts_ms` or `t_iso`, remove them to ensure
+        # logs do not contain those fields.
+        obj.pop("ts_ms", None)
+        obj.pop("t_iso", None)
         # Sequence and identity
         obj.setdefault("seq", self.seq)
         obj.setdefault("schema", "v1")
         obj.setdefault("session_id", self.session_id)
         obj.setdefault("pid", self.pid)
+        # If rotation day changed, rotate handles (this will also reopen debug fh)
         if time.strftime("%Y%m%d") != self._rot_day:
             self.rotate()
-        self._fh.write(json.dumps(obj) + "\n")
+
+        # Always write full record to debug file when enabled
+        try:
+            if self.dual_file and self._debug_fh:
+                # Write a copy to debug (full, except ts_ms/t_iso already removed)
+                self._debug_fh.write(json.dumps(obj) + "\n")
+        except Exception:
+            # non-fatal
+            pass
+
+        # Write to main file only if filtering allowed it (we already applied filters above)
+        try:
+            if self._fh:
+                self._fh.write(json.dumps(obj) + "\n")
+        except Exception:
+            pass

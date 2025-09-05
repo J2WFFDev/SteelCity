@@ -111,8 +111,10 @@ Generated 2025-08-27.
 ## Logging and rotation
 
 - NDJSON files are written to `logs/bridge_YYYYMMDD.ndjson` and rotate automatically at midnight (calendar day change).
+ - Dual-file mode: when enabled in `config.yaml` the bridge writes a compact operational log to `logs/` and a full debug log to `logs/debug/` (files named `<prefix>_debug_YYYYMMDD_HHMMSS.ndjson`). This keeps day-to-day logs concise while preserving verbose diagnostics for later analysis.
 - Writes are line-buffered; each JSON line is flushed on write. Files are properly closed on rotation/stop.
 - The `seq` counter increments per event and continues across midnight while the process runs; it resets on process restart. `ts_ms` is process‑relative (monotonic) milliseconds.
+ - Note: the NDJSON writer no longer emits machine timestamps `ts_ms` or `t_iso` in new logs; only `hms` (human-local time) and `t_rel_ms` are present. Ingest tools in `tools/` have been updated to fallback from `ts_ms` to `t_rel_ms` or wall-clock time when building DB records.
 - Process stdout/stderr goes to `logs/bridge_run.out` when using `run_bridge.sh`.
 - Planned enhancement: size‑based NDJSON rotation and a per‑run `session_id` included in filenames and records; optionally redirect process logs fully to journald under the user service.
 

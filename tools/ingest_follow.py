@@ -38,11 +38,26 @@ def current_daily_file(log_dir: pathlib.Path, prefix: str) -> pathlib.Path:
 
 def ingest_line(conn: sqlite3.Connection, rec: dict) -> None:
     try:
+        def _compute_ts_ms(r: dict) -> float:
+            v = r.get("ts_ms", None)
+            if v is not None:
+                try:
+                    return float(v)
+                except Exception:
+                    pass
+            v = r.get("t_rel_ms", None)
+            if v is not None:
+                try:
+                    return float(v)
+                except Exception:
+                    pass
+            return time.time() * 1000.0
+
         conn.execute(
             "INSERT OR IGNORE INTO events(seq, ts_ms, type, msg, plate, t_rel_ms, session_id, pid, schema, data_json) VALUES(?,?,?,?,?,?,?,?,?,?)",
             (
                 int(rec.get("seq", 0)),
-                float(rec.get("ts_ms", 0.0)),
+                float(_compute_ts_ms(rec)),
                 str(rec.get("type")),
                 rec.get("msg"),
                 rec.get("plate"),

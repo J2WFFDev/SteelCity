@@ -42,11 +42,30 @@ def ingest_file(conn: sqlite3.Connection, path: str, session: Optional[str] = No
                 continue
             if session and rec.get("session_id") != session:
                 continue
+            # Determine ts_ms: prefer the recorded monotonic ts_ms, else fall back to
+            # t_rel_ms (if present) or current wall-clock time in ms. This keeps
+            # existing downstream consumers working when `ts_ms` is not present
+            # in the NDJSON (the logger now omits machine timestamps).
+            def _compute_ts_ms(r):
+                v = r.get("ts_ms", None)
+                if v is not None:
+                    try:
+                        return float(v)
+                    except Exception:
+                        pass
+                v = r.get("t_rel_ms", None)
+                if v is not None:
+                    try:
+                        return float(v)
+                    except Exception:
+                        pass
+                return time.time() * 1000.0
+
             conn.execute(
                 "INSERT OR IGNORE INTO events(seq, ts_ms, type, msg, plate, t_rel_ms, session_id, pid, schema, data_json) VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (
                     int(rec.get("seq", 0)),
-                    float(rec.get("ts_ms", 0.0)),
+                    float(_compute_ts_ms(rec)),
                     str(rec.get("type")),
                     rec.get("msg"),
                     rec.get("plate"),

@@ -12,13 +12,22 @@ from .ble.wtvb_parse import parse_5561
 class Bridge:
     def __init__(self, cfg: AppCfg):
         self.cfg = cfg
-        self.logger = NdjsonLogger(cfg.logging.dir, cfg.logging.file_prefix)
+        # Instantiate logger with dual-file options from config (main log + debug subdir)
+        try:
+            dual = bool(getattr(cfg.logging, "dual_file", False))
+            debug_subdir = getattr(cfg.logging, "debug_subdir", None)
+        except Exception:
+            dual = False
+            debug_subdir = None
+        self.logger = NdjsonLogger(cfg.logging.dir, cfg.logging.file_prefix, dual_file=dual, debug_subdir=debug_subdir)
         # Apply logging mode and whitelist from config if present
         try:
             if hasattr(cfg.logging, 'mode'):
                 self.logger.mode = cfg.logging.mode or self.logger.mode
             if hasattr(cfg.logging, 'verbose_whitelist') and cfg.logging.verbose_whitelist:
                 self.logger.verbose_whitelist.update(cfg.logging.verbose_whitelist)
+            # Timestamp inclusion flags were removed; the logger no longer
+            # emits `ts_ms` or `t_iso` for any record.
         except Exception:
             pass
         self.t0_ns: Optional[int] = None
@@ -154,7 +163,7 @@ class Bridge:
 
         # Start BT50 sensor loops (with reconnect)
         for s in self.cfg.sensors:
-            task = asyncio.create_task(self._bt50_loop(s.plate, s.adapter, s.mac, s.notify_uuid, s.config_uuid))
+            task = asyncio.create_task(self._bt50_loop(s.sensor, s.adapter, s.mac, s.notify_uuid, s.config_uuid))
             self._bt_tasks.append(task)
 
         # Periodic status
@@ -175,7 +184,7 @@ class Bridge:
         # Pull per-sensor config for backoff and keepalive/idle
         scfg = None
         for s in self.cfg.sensors:
-            if s.plate == sensor_id and s.mac == mac:
+            if s.sensor == sensor_id and s.mac == mac:
                 scfg = s
                 break
         reconnect_initial = float(getattr(scfg, "reconnect_initial_sec", 2.0) if scfg else 2.0)
@@ -303,6 +312,25 @@ class Bridge:
         # Generic structured AMG signal event; specific T0 handling remains in _on_t0 for t0_ns state.
         if name == "T0":
             self.logger.write({"type":"event","msg":f"Timer_T0","data":{"raw": raw.hex()}})
+        elif name == "SHOT_RAW":
+            # Process individual shot events
+            device_id = getattr(self.amg, 'mac', 'DC1A')[-4:] if hasattr(self.amg, 'mac') else "DC1A"
+            shot_time_ms = round(ts_ns / 1_000_000, 3)
+            
+            # Create SHOT_RAW event with chronological timestamp for actual shots
+            event_data = {
+                "type": "event",
+                "msg": "SHOT_RAW",
+                "data": {
+                    "device_id": device_id,
+                    "timestamp_ms": shot_time_ms,
+                    "signal": "shot_report",
+                    "raw": raw.hex()
+                }
+            }
+            if self.t0_ns is not None:
+                event_data["t_rel_ms"] = (ts_ns - self.t0_ns) / 1e6
+            self.logger.write(event_data)
         elif name == "ARROW_END":
             self.logger.write({"type":"event","msg":f"String_END","data":{"raw": raw.hex()}})
         elif name == "TIMEOUT_END":
@@ -564,9 +592,14 @@ class Bridge:
     def _write_detailed_buffer(self, sensor_id: str, buffer, avg_amp: float, impact_count: int, hit):
         """Write detailed buffer data to text file for analysis"""
         import datetime as dt
+        import pathlib
+        
+        # Create sensorbuffer subdirectory if it doesn't exist
+        buffer_dir = pathlib.Path(self.cfg.logging.dir) / "sensorbuffer"
+        buffer_dir.mkdir(parents=True, exist_ok=True)
         
         timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"logs/buffer_detail_{sensor_id}_{timestamp}_amp{avg_amp:.3f}_impacts{impact_count}.txt"
+        filename = buffer_dir / f"buffer_detail_{sensor_id}_{timestamp}_amp{avg_amp:.3f}_impacts{impact_count}.txt"
         
         try:
             with open(filename, 'w') as f:
@@ -589,10 +622,12 @@ class Bridge:
                 f.write(f"# Non-zero Velocities: {sum(1 for _, _, vx, vy, vz in buffer if abs(vx) > 0.001 or abs(vy) > 0.001 or abs(vz) > 0.001)}\n")
                 f.write(f"# Time Span: {(buffer[-1][0] - buffer[0][0]) / 1_000_000:.1f} ms\n")
                 
+            # Log as info only for buffers with meaningful activity, otherwise debug
+            log_type = "info" if (impact_count > 0 or avg_amp > 0.01) else "debug"
             self.logger.write({
-                "type": "info",
+                "type": log_type,
                 "msg": "buffer_detail_written", 
-                "data": {"sensor_id": sensor_id, "filename": filename, "samples": len(buffer)}
+                "data": {"sensor_id": sensor_id, "filename": str(filename), "samples": len(buffer), "avg_amp": avg_amp, "impacts": impact_count}
             })
         except Exception as e:
             self.logger.write({

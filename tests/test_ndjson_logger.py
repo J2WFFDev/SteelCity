@@ -1,4 +1,41 @@
 import json
+import tempfile
+import pathlib
+import time
+
+from steelcity_impact_bridge.logs import NdjsonLogger
+
+
+def test_ndjson_logger_drops_machine_timestamps(tmp_path):
+    # Create logger in a temporary directory
+    d = tmp_path / "logs"
+    d.mkdir()
+    logger = NdjsonLogger(str(d), "bridge_smoke")
+
+    # Prepare an object that includes ts_ms and t_iso (simulating a caller mistake)
+    obj = {
+        "type": "info",
+        "msg": "test",
+        "data": {"a": 1},
+        "ts_ms": 123456789,
+        "t_iso": "2025-09-05T16:11:25.413Z",
+    }
+
+    logger.write(obj)
+
+    # Allow the logger to close/rotate by reading the written file(s)
+    files = list(d.glob("bridge_smoke_*.ndjson"))
+    assert files, f"No ndjson file written in {d}"
+
+    # Read the first file and ensure ts_ms and t_iso are not present in the JSON
+    text = files[0].read_text(encoding="utf-8")
+    lines = [l for l in text.splitlines() if l.strip()]
+    assert lines, "No lines written to ndjson file"
+    entry = json.loads(lines[0])
+    assert "ts_ms" not in entry
+    assert "t_iso" not in entry
+    assert "hms" in entry
+import json
 import sys
 from pathlib import Path
 

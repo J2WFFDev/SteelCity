@@ -25,11 +25,11 @@ class BT50Test:
     def log(self, msg_type, message, data=None):
         self.seq += 1
         now = time.time()
+        # Per logging policy: do not include machine timestamps (ts_ms/t_iso).
         entry = {
             "type": msg_type,
             "msg": message,
             "data": data or {},
-            "ts_ms": now * 1000,
             "hms": datetime.fromtimestamp(now).strftime("%H:%M:%S.%f")[:-3],
             "seq": self.seq
         }

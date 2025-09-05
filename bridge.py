@@ -342,6 +342,25 @@ class Bridge:
         # Generic structured AMG signal event; specific T0 handling remains in _on_t0 for t0_ns state.
         if name == "T0":
             self.logger.write({"type":"event","msg":f"Timer_T0","data":{"raw": raw.hex()}})
+        elif name == "SHOT_RAW":
+            # Process individual shot events
+            device_id = getattr(self.amg, 'mac', 'DC1A')[-4:] if hasattr(self.amg, 'mac') else "DC1A"
+            shot_time_ms = round(ts_ns / 1_000_000, 3)
+            
+            # Create SHOT_RAW event with chronological timestamp for actual shots
+            event_data = {
+                "type": "event",
+                "msg": "SHOT_RAW",
+                "data": {
+                    "device_id": device_id,
+                    "timestamp_ms": shot_time_ms,
+                    "signal": "shot_report",
+                    "raw": raw.hex()
+                }
+            }
+            if self.t0_ns is not None:
+                event_data["t_rel_ms"] = (ts_ns - self.t0_ns) / 1e6
+            self.logger.write(event_data)
         elif name == "ARROW_END":
             self.logger.write({"type":"event","msg":f"String_END","data":{"raw": raw.hex()}})
         elif name == "TIMEOUT_END":

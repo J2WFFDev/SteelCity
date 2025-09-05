@@ -3,11 +3,11 @@
   "$id": "http://example.com/steelcity/schema_v1.json",
   "title": "SteelCity NDJSON v1",
   "type": "object",
-  "required": ["seq", "type", "ts_ms"],
+  "required": ["seq", "type"],
   "properties": {
     "seq": { "type": "integer", "minimum": 0 },
     "type": { "type": "string", "enum": ["event","status","info","error","debug"] },
-    "ts_ms": { "type": "number" },
+  "ts_ms": { "type": "number", "description": "(optional) process-relative monotonic ms. Deprecated in new logs; prefer `t_rel_ms` or `hms`." },
     "t_rel_ms": { "type": ["number","null"] },
     "plate": { "type": "string" },
     "msg": { "type": "string" },
