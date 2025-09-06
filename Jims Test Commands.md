@@ -9,5 +9,5 @@ ssh jrwest@192.168.1.173 'pkill -f "continuous_bridge.py" || pkill -f "minimal_b
 Minimum Bridge
 ssh jrwest@192.168.1.173 'cd ~/projects/steelcity && timeout 30 .venv/bin/python minimal_bridge.py'
 
-Production
-ssh jrwest@192.168.1.173 'cd ~/projects/steelcity && timeout 30 .venv/bin/python bridge.py'
+Production (run as package so relative imports work)
+ssh jrwest@192.168.1.173 'cd ~/projects/steelcity && PYTHONPATH=src timeout 30 .venv/bin/python -m steelcity_impact_bridge.bridge'
